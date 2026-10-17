@@ -6640,7 +6640,41 @@ function _ttsExtractText(blockEl) {
   const clone = blockEl.cloneNode(true);
   const bar = clone.querySelector('.tts-bar');
   if (bar) bar.remove();
+  // LOCAL PATCH: the speaker's name is shown, not read aloud.
+  const nm = clone.querySelector('.npc-name');
+  if (nm) nm.remove();
   return (clone.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+}
+
+// LOCAL PATCH: shared fetch so the next block can be requested while the
+// current one plays, without ever asking for the same audio twice.
+const _ttsPcmPending = new Map();
+function _ttsSpeakerOf(blockEl) {
+  return ((blockEl.querySelector('.npc-name') || {}).textContent || '').trim();
+}
+function _ttsFetchPcm(text, speaker) {
+  const key = speaker + '|' + _ttsVoice + '|' + text;
+  if (_ttsPcmPending.has(key)) return _ttsPcmPending.get(key);
+  const p = (async () => {
+    const resp = await fetch('/tts', {
+      method: 'POST',
+      headers: _authHeaders(),
+      body: JSON.stringify({ text, voice: _ttsVoice, speaker }),
+    });
+    if (!resp.ok) throw new Error('TTS ' + resp.status);
+    const pcm = await resp.arrayBuffer();
+    if (!pcm.byteLength) throw new Error('TTS empty');
+    return pcm;
+  })();
+  p.catch(() => _ttsPcmPending.delete(key));
+  _ttsPcmPending.set(key, p);
+  while (_ttsPcmPending.size > 6) _ttsPcmPending.delete(_ttsPcmPending.keys().next().value);
+  return p;
+}
+function _ttsPrefetch(blockEl) {
+  if (!_ttsServerOk) return;
+  const text = _ttsExtractText(blockEl);
+  if (text) _ttsFetchPcm(text, _ttsSpeakerOf(blockEl)).catch(() => {});
 }
 
 async function _ttsPlayBlock(btn, blockEl) {
@@ -6660,14 +6694,8 @@ async function _ttsPlayBlock(btn, blockEl) {
   _ttsActivePlayBtn = btn;
 
   try {
-    const resp = await fetch('/tts', {
-      method: 'POST',
-      headers: _authHeaders(),
-      body: JSON.stringify({ text, voice: _ttsVoice }),
-    });
-    if (!resp.ok) throw new Error('TTS ' + resp.status);
-    const pcm = await resp.arrayBuffer();
-    if (!pcm.byteLength) throw new Error('TTS empty');
+    const pcm = await _ttsFetchPcm(text, _ttsSpeakerOf(blockEl));
+    if (_ttsActivePlayBtn !== btn) return;   // stopped or superseded while loading
 
     await resumeP;
     if (ctx.state === 'suspended') await ctx.resume();
@@ -6779,7 +6807,21 @@ function _addTtsBar(blockEl) {
   playBtn.className = 'tts-play-btn';
   playBtn.innerHTML = _SVG_SPEAKER;
   playBtn.setAttribute('aria-label', 'Listen to narration');
-  playBtn.addEventListener('click', e => { e.stopPropagation(); _ttsPlayBlock(playBtn, blockEl); });
+  // LOCAL PATCH: play continues through the blocks below; clicking a playing
+  // block stops everything.
+  playBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    const wasActive = playBtn.classList.contains('tts-playing') || playBtn.classList.contains('tts-loading');
+    _ttsAutoQueue.length = 0;
+    _ttsStopActive();
+    if (wasActive) return;
+    const all = Array.from(document.querySelectorAll('.tts-play-btn'));
+    for (const b of all.slice(all.indexOf(playBtn))) {
+      const el = b.closest('.dm-block, .npc-block');
+      if (el) _ttsAutoQueue.push([b, el]);
+    }
+    _ttsDrainAutoQueue();
+  });
   bar.appendChild(playBtn);
 
   const voiceBtn = document.createElement('button');
@@ -6801,9 +6843,31 @@ function _addTtsBar(blockEl) {
   blockEl.appendChild(bar);
 
   if (_ttsAutoNarrate) {
-    // Defer one tick so the bar is in the DOM before triggering the click path
-    setTimeout(() => _ttsPlayBlock(playBtn, blockEl), 0);
+    // LOCAL PATCH: queue auto-narrated blocks so a burst of blocks plays in
+    // order instead of each new block cutting off the previous one.
+    _ttsAutoQueue.push([playBtn, blockEl]);
+    setTimeout(_ttsDrainAutoQueue, 0);
   }
+}
+
+const _ttsAutoQueue = [];
+let _ttsAutoBusy = false;
+async function _ttsDrainAutoQueue() {
+  if (_ttsAutoBusy) return;
+  _ttsAutoBusy = true;
+  try {
+    while (_ttsAutoQueue.length) {
+      const [btn, el] = _ttsAutoQueue.shift();
+      if (!document.body.contains(el)) continue;
+      if (_ttsAutoQueue.length) _ttsPrefetch(_ttsAutoQueue[0][1]);
+      try { await _ttsPlayBlock(btn, el); } catch (e) {}
+      await new Promise(resolve => {
+        const t = setInterval(() => {
+          if (_ttsActivePlayBtn !== btn) { clearInterval(t); resolve(); }
+        }, 200);
+      });
+    }
+  } finally { _ttsAutoBusy = false; }
 }
 
 document.addEventListener('click', () => {
@@ -7641,6 +7705,12 @@ function connect() {
     }
     if (payload.dice_pending !== undefined) {
       _updateDicePendingBadge(payload.dice_pending);
+    }
+    if (payload.cena_imagem !== undefined && typeof window._onCenaImagem === 'function') {
+      window._onCenaImagem(payload.cena_imagem);  // LOCAL PATCH: galeria
+    }
+    if (payload.dice3d && typeof window._onDice3d === 'function') {
+      window._onDice3d(payload.dice3d);  // LOCAL PATCH: dados 3D
     }
 
     if (payload.stats) {
@@ -8500,5 +8570,516 @@ function _initDicePad() {
   window._onDiceRequestCancelled = _onDiceRequestCancelled;
 }
 </script>
+<!-- LOCAL PATCH: speaker portrait card (bottom-right) -->
+<style>
+  #speaker-card {
+    position: fixed; right: 18px; bottom: 18px; width: 190px; z-index: 9000;
+    border-radius: 10px; overflow: hidden; pointer-events: none;
+    background: rgba(18, 14, 10, 0.92); border: 1px solid rgba(180, 140, 60, 0.55);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.55);
+    opacity: 0; transform: translateY(12px); transition: opacity .35s ease, transform .35s ease;
+  }
+  #speaker-card.on { opacity: 1; transform: translateY(0); }
+  #speaker-card img { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover; object-position: top; }
+  #speaker-card .sc-name {
+    padding: 7px 10px 8px; text-align: center; font-size: 13px; letter-spacing: .06em;
+    color: rgba(240, 210, 120, 1); text-transform: uppercase;
+  }
+  @media (max-width: 700px) { #speaker-card { width: 120px; right: 10px; bottom: 10px; } }
+</style>
+<div id="speaker-card" aria-hidden="true"><img alt=""><div class="sc-name"></div></div>
+<script>
+(function () {
+  let table = {};
+  let flashName = '', flashUntil = 0, shown = '';
+  const card = document.getElementById('speaker-card');
+  const img = card.querySelector('img'), label = card.querySelector('.sc-name');
+  function load() {
+    fetch('/portraits').then(r => r.ok ? r.json() : {}).then(t => {
+      table = t || {};
+      Object.values(table).forEach(u => { const i = new Image(); i.src = u; });
+    }).catch(() => {});
+  }
+  load(); setInterval(load, 60000);
+  function nameOf(blockEl) {
+    const n = blockEl && blockEl.querySelector('.npc-name, .player-name');
+    return n ? n.textContent.trim() : '';
+  }
+  function show(name) {
+    if (name === shown) return;
+    shown = name;
+    if (name && table[name]) {
+      img.src = table[name]; label.textContent = name; card.classList.add('on');
+    } else { card.classList.remove('on'); }
+  }
+  // A new block from a character flashes their card for a few seconds.
+  new MutationObserver(muts => {
+    for (const m of muts) for (const n of m.addedNodes) {
+      if (!(n instanceof HTMLElement)) continue;
+      const b = n.matches('.npc-block, .player-block') ? n : n.querySelector && n.querySelector('.npc-block, .player-block');
+      if (!b) continue;
+      setTimeout(() => {
+        const nm = nameOf(b);
+        if (table[nm]) { flashName = nm; flashUntil = Date.now() + 7000; }
+      }, 50);
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+  // While a block is being read aloud, its speaker's card stays up.
+  setInterval(() => {
+    let name = '';
+    try {
+      if (typeof _ttsActivePlayBtn !== 'undefined' && _ttsActivePlayBtn) {
+        name = nameOf(_ttsActivePlayBtn.closest('.npc-block, .dm-block'));
+        flashUntil = 0;
+      }
+    } catch (e) {}
+    if (!name && Date.now() < flashUntil) name = flashName;
+    show(name);
+  }, 250);
+})();
+</script>
+<!-- LOCAL PATCH: on-screen roller in every skin + voice button on the newest block -->
+<style>
+  body:not(.input-only) #dice-drawer.lp-open {
+    display: flex !important; position: fixed; top: 0; bottom: 0; right: 0; left: auto; transform: none !important;
+    width: 340px; max-width: 92vw; height: 100vh; z-index: 9500; flex-direction: column; overflow: auto;
+    padding: 44px 14px 14px; background: #17120d; color: #e8dcc0;
+    border-left: 1px solid rgba(180, 140, 60, .5); box-shadow: -2px 0 50px rgba(0, 0, 0, .5);
+  }
+  body:not(.input-only) #dice-drawer.lp-open #dice-pad { display: flex !important; flex-direction: column; gap: 10px; }
+  #lp-dice-close {
+    display: none; position: fixed; top: 8px; right: 12px; z-index: 9501; cursor: pointer;
+    background: none; border: 1px solid rgba(180, 140, 60, .5); border-radius: 6px;
+    color: #e8dcc0; font-size: 18px; line-height: 1; padding: 4px 9px;
+  }
+  body:not(.input-only) #dice-drawer.lp-open ~ #lp-dice-close { display: block; }
+  .tts-play-btn, .tts-voice-btn { color: rgba(180, 140, 60, 0.55); }
+  #dice-pending-badge { cursor: pointer; pointer-events: auto; }
+</style>
+<button id="lp-dice-close" aria-label="Fechar dados">×</button>
+<script>
+(function () {
+  if (document.body.classList.contains('input-only')) return;
+  const drawer = document.getElementById('dice-drawer');
+  const closeBtn = document.getElementById('lp-dice-close');
+  if (drawer && closeBtn) {
+    drawer.after(closeBtn);
+    let dismissed = false, wasPulsing = false, closeAt = 0;
+    const open = () => drawer.classList.add('lp-open');
+    const close = () => drawer.classList.remove('lp-open');
+    closeBtn.addEventListener('click', () => { dismissed = true; close(); });
+    // The "Waiting on…" badge is only a notice; clicking it reopens the roller.
+    document.addEventListener('click', e => {
+      const b = e.target.closest && e.target.closest('#dice-pending-badge');
+      if (b) { dismissed = false; open(); }
+    });
+    setInterval(() => {
+      const roll = document.getElementById('dp-roll');
+      if (!roll) return;
+      const pulsing = roll.classList.contains('pulse');
+      if (pulsing && !wasPulsing) { dismissed = false; closeAt = 0; }
+      if (pulsing && !dismissed) open();
+      if (!pulsing && wasPulsing) closeAt = Date.now() + 4000;   // rolled or cancelled
+      if (closeAt && Date.now() > closeAt) { closeAt = 0; close(); }
+      wasPulsing = pulsing;
+    }, 300);
+  }
+  // The stock page only adds the voice bar when the NEXT block starts, so the
+  // newest block had no button. Add it once a block has been still for a moment.
+  const seen = new WeakMap();
+  setInterval(() => {
+    if (typeof _addTtsBar !== 'function') return;
+    const blocks = document.querySelectorAll('.dm-block, .npc-block');
+    const b = blocks[blocks.length - 1];
+    if (!b || b.querySelector(':scope > .tts-bar')) return;
+    const len = b.textContent.length, prev = seen.get(b);
+    if (prev && prev.len === len && len > 0) {
+      if (Date.now() - prev.t > 1200) _addTtsBar(b);
+    } else seen.set(b, { len, t: Date.now() });
+  }, 400);
+})();
+</script>
+<!-- LOCAL PATCH: galeria (botão + visualizador em ordem de publicação; galeria.py mostrar/esconder) -->
+<style>
+  #cena-img { position: fixed; inset: 0; z-index: 8500; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; padding: 16px; box-sizing: border-box;
+    background: rgba(8, 7, 6, .86); opacity: 0; pointer-events: none; transition: opacity .6s ease; }
+  #cena-img.on { opacity: 1; pointer-events: auto; }
+  #cena-img figure { margin: 0; max-width: min(92vw, 1400px); text-align: center; }
+  #cena-img figure img { max-width: 100%; max-height: 68vh; border: 1px solid #6d5a3a;
+    box-shadow: 0 10px 60px rgba(0,0,0,.7); }
+  #cena-img figcaption { margin-top: .7em; color: #e9dcc0; font-family: Georgia, serif; font-size: 1.25rem; }
+  #cena-img figcaption small { display: block; margin-top: .25em; font-size: .78rem; color: #a8987a; }
+  #cena-img figcaption em { display: block; margin-top: .3em; font-size: .9rem; color: #c9b996; }
+  #cena-img .nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(30,24,16,.8);
+    color: #e9dcc0; border: 1px solid #6d5a3a; width: 46px; height: 64px; font-size: 1.8rem; cursor: pointer; }
+  #cena-img .nav.ant { left: 12px; } #cena-img .nav.prox { right: 12px; }
+  #cena-img .fechar { position: absolute; top: 12px; right: 14px; background: none; border: 0;
+    color: #e9dcc0; font-size: 1.8rem; cursor: pointer; }
+  #cena-img .cont { position: absolute; top: 18px; left: 18px; color: #a8987a; font: .85rem Georgia, serif; }
+  #cena-tiras { display: flex; gap: 6px; overflow-x: auto; max-width: 92vw; padding-bottom: 4px; }
+  #cena-tiras img { height: 54px; width: 80px; object-fit: cover; opacity: .5; cursor: pointer;
+    border: 1px solid transparent; flex: none; }
+  #cena-tiras img.atual { opacity: 1; border-color: #d9b36a; }
+  #galeria-btn { position: fixed; left: 14px; bottom: 14px; z-index: 8400; padding: .45em .9em;
+    background: rgba(25, 20, 14, .85); color: #e9dcc0; border: 1px solid #6d5a3a; border-radius: 4px;
+    font: .85rem Georgia, serif; cursor: pointer; }
+  #galeria-btn:hover { border-color: #d9b36a; }
+  body.input-only #cena-img, body.input-only #galeria-btn { display: none; }
+</style>
+<button id="galeria-btn" type="button" title="Galeria de lugares e cenas">🖼 Galeria</button>
+<div id="cena-img" role="dialog" aria-label="Galeria">
+  <span class="cont"></span>
+  <button class="fechar" type="button" aria-label="Fechar">✕</button>
+  <button class="nav ant" type="button" aria-label="Anterior">‹</button>
+  <figure><img alt=""><figcaption><span></span><em></em><small></small></figcaption></figure>
+  <button class="nav prox" type="button" aria-label="Próxima">›</button>
+  <div id="cena-tiras"></div>
+</div>
+<script>
+(() => {
+  const el = document.getElementById('cena-img');
+  const img = el.querySelector('figure img');
+  const tiras = document.getElementById('cena-tiras');
+  let itens = [], idx = 0;
+
+  async function carregar() {
+    try {
+      const r = await fetch('/galeria/galeria.json', { cache: 'no-store' });
+      itens = r.ok ? await r.json() : [];
+    } catch { itens = []; }
+    itens.sort((a, b) => (a.publicado || '').localeCompare(b.publicado || ''));
+    tiras.innerHTML = '';
+    itens.forEach((it, k) => {
+      const t = document.createElement('img');
+      t.src = '/galeria/' + encodeURIComponent(it.arquivo); t.alt = it.titulo; t.title = it.titulo;
+      t.loading = 'lazy'; t.onclick = () => ver(k);
+      tiras.appendChild(t);
+    });
+  }
+
+  function exibir(url, titulo, nota, credito) {
+    img.src = url; img.alt = titulo || '';
+    el.querySelector('figcaption span').textContent = titulo || '';
+    el.querySelector('figcaption em').textContent = nota || '';
+    el.querySelector('figcaption small').textContent = credito || '';
+    el.classList.add('on');
+  }
+
+  function ver(k) {
+    if (!itens.length) return;
+    idx = (k + itens.length) % itens.length;
+    const it = itens[idx];
+    exibir('/galeria/' + encodeURIComponent(it.arquivo), it.titulo, it.nota, `${it.lugar} · ${it.credito}`);
+    el.querySelector('.cont').textContent = `${idx + 1} / ${itens.length}`;
+    [...tiras.children].forEach((t, n) => t.classList.toggle('atual', n === idx));
+    tiras.children[idx]?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }
+
+  const fechar = () => el.classList.remove('on');
+  el.querySelector('.fechar').onclick = fechar;
+  el.querySelector('.ant').onclick = () => ver(idx - 1);
+  el.querySelector('.prox').onclick = () => ver(idx + 1);
+  el.addEventListener('click', e => { if (e.target === el) fechar(); });
+  document.addEventListener('keydown', e => {
+    if (!el.classList.contains('on')) return;
+    if (e.key === 'Escape') fechar();
+    else if (e.key === 'ArrowLeft') ver(idx - 1);
+    else if (e.key === 'ArrowRight') ver(idx + 1);
+  });
+  // Abre na mais recente; o jogador volta com ‹ para ver as antigas.
+  document.getElementById('galeria-btn').onclick = async () => { await carregar(); ver(itens.length - 1); };
+
+  window._onCenaImagem = async c => {
+    if (!c) return fechar();
+    await carregar();
+    const k = itens.findIndex(it => '/galeria/' + it.arquivo === c.url);
+    if (k >= 0) ver(k);
+    else { exibir(c.url, c.titulo, '', c.credito); el.querySelector('.cont').textContent = ''; }
+  };
+})();
+</script>
+<!-- LOCAL PATCH: dados 3D na tela (dice-box-threejs, assets em /dice3d/) -->
+<style>
+  #dice3d-layer { position: fixed; inset: 0; z-index: 9000; pointer-events: none;
+    opacity: 0; transition: opacity .5s ease; }
+  #dice3d-layer.on { opacity: 1; }
+  #dice3d-layer canvas { width: 100% !important; height: 100% !important; }
+  /* LOCAL PATCH (simultâneo): várias plaquinhas empilhadas, uma por rolagem */
+  /* LOCAL PATCH: plaquinhas no canto inferior direito, empilhadas (pedido do jogador) */
+  #dice3d-plate { position: fixed; right: 16px; bottom: 16px; z-index: 9001; pointer-events: none;
+    display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 8px;
+    max-width: min(92vw, 420px); }
+  #dice3d-plate .placa { padding: .4em 1em !important; text-align: right !important; }
+  #dice3d-plate .total { font-size: 1.9rem !important; }
+  #dice3d-plate .placa { opacity: 0; transform: translateY(12px); transition: opacity .35s ease, transform .35s ease;
+    padding: .55em 1.4em; border-radius: 6px; text-align: center;
+    background: rgba(20, 14, 8, .82); border: 1px solid #b8862f; color: #f3e3c0;
+    font-family: Georgia, 'Times New Roman', serif; box-shadow: 0 6px 30px rgba(0,0,0,.5); }
+  #dice3d-plate .placa.on { opacity: 1; transform: translateY(0); }
+  #dice3d-plate .quem { font-size: .85rem; letter-spacing: .08em; text-transform: uppercase; color: #d9b36a; }
+  #dice3d-plate .total { font-size: 2.6rem; font-weight: 700; line-height: 1.1; }
+  #dice3d-plate .det { font-size: .85rem; opacity: .8; }
+  #dice3d-plate .placa.crit { border-color: #ffd34d; box-shadow: 0 0 40px rgba(255, 200, 60, .55); }
+  #dice3d-plate .placa.fumble { border-color: #b03a2e; box-shadow: 0 0 40px rgba(200, 50, 40, .5); }
+  body.input-only #dice3d-layer, body.input-only #dice3d-plate { display: none; }
+  #dados-btn { position: fixed; left: 14px; bottom: 56px; z-index: 8400; padding: .45em .9em;
+    background: rgba(25, 20, 14, .85); color: #e9dcc0; border: 1px solid #6d5a3a; border-radius: 4px;
+    font: .85rem Georgia, serif; cursor: pointer; }
+  #dados-btn:hover { border-color: #d9b36a; }
+  #dados-painel { position: fixed; left: 14px; bottom: 98px; z-index: 8450; display: none;
+    max-width: calc(100vw - 28px); padding: 12px 14px; background: rgba(20, 16, 11, .96);
+    border: 1px solid #6d5a3a; border-radius: 6px; color: #e9dcc0; font: .9rem Georgia, serif;
+    box-shadow: 0 8px 40px rgba(0,0,0,.6); }
+  #dados-painel.on { display: block; }
+  #dados-painel h3 { margin: 0 0 8px; font-weight: normal; color: #d9b36a; font-size: 1rem; }
+  #dados-painel .linha { display: grid; grid-template-columns: 70px 1fr 90px 34px; gap: 6px; align-items: center; margin: 5px 0; }
+  #dados-painel select, #dados-painel button { background: #2a2219; color: #e9dcc0; border: 1px solid #5a4a32;
+    border-radius: 3px; padding: 3px 5px; font: inherit; font-size: .85rem; }
+  #dados-painel button { cursor: pointer; }
+  #dados-painel .rodape { display: flex; justify-content: space-between; margin-top: 10px; gap: 8px; }
+  body.input-only #dados-btn, body.input-only #dados-painel { display: none; }
+</style>
+<div id="dice3d-layer"></div>
+<div id="dice3d-plate"></div>
+<script type="module">
+  import DiceBox from '/dice3d/dice-box-threejs.es.js';
+
+  const layer = document.getElementById('dice3d-layer');
+  const plate = document.getElementById('dice3d-plate');
+  const fila = [];
+  let box = null, ocupado = false, temaAtual = null;
+
+  // Set de dados por personagem, escolhido no painel "🎲 Dados" (guardado neste navegador).
+  const SETS = {
+    'Dano': ['fire', 'ice', 'lightning', 'thunder', 'acid', 'poison', 'necrotic', 'radiant', 'force', 'psychic', 'air', 'water', 'earth'],
+    'Especiais': ['bronze', 'astralsea', 'starynight', 'bloodmoon', 'dragons', 'inspired', 'glitterparty', 'breebaby', 'pinkdreams', 'birdup', 'tigerking', 'rainbow'],
+    'Cores': ['black', 'white', 'coin_default', 'coin_silver'],
+  };
+  const NOMES = { fire: 'Fogo', ice: 'Gelo', lightning: 'Relâmpago', thunder: 'Trovão', acid: 'Ácido',
+    poison: 'Veneno', necrotic: 'Necrótico', radiant: 'Radiante', force: 'Força', psychic: 'Psíquico',
+    air: 'Ar', water: 'Água', earth: 'Terra', bronze: 'Bronze de Thylea', astralsea: 'Mar Astral',
+    starynight: 'Noite Estrelada', bloodmoon: 'Lua de Sangue', dragons: 'Aqui Há Dragões',
+    inspired: 'Inspirado', glitterparty: 'Purpurina', breebaby: 'Pôr do Sol Pastel', pinkdreams: 'Sonhos Rosa',
+    birdup: 'Passarinho', tigerking: 'Tigre', rainbow: 'Arco-íris', black: 'Preto', white: 'Branco',
+    coin_default: 'Moeda de ouro', coin_silver: 'Moeda de prata' };
+  const MATERIAIS = { metal: 'Metal', glass: 'Vidro', plastic: 'Plástico', wood: 'Madeira', none: 'Fosco' };
+  const PADRAO = {
+    'Mestre':  ['bronze', 'metal'],
+  };
+  // Sets próprios: a "Noite Estrelada" original sorteia fundos claros e até da cor do número.
+  const CUSTOM = {
+    starynight: { name: 'noite_legivel', foreground: '#F6ECCB', outline: '#050b1c', texture: 'speckles',
+      background: ['#091636', '#0f1f45', '#16295a', '#1d2f63'] },
+  };
+  const CHAVE = 'dados3d-sets';
+  const lerSets = () => { try { return JSON.parse(localStorage.getItem(CHAVE)) || {}; } catch { return {}; } };
+  const gravarSets = m => { try { localStorage.setItem(CHAVE, JSON.stringify(m)); } catch {} };
+  const nomeBase = who => {
+    const w = (who || 'Mestre').trim();
+    if (/^(mestre|dm|gm)$/i.test(w)) return 'Mestre';
+    return Object.keys(PADRAO).find(k => w.toLowerCase().startsWith(k.toLowerCase())) || w;
+  };
+  const tema = who => {
+    const nome = nomeBase(who);
+    const [set, mat] = lerSets()[nome] || PADRAO[nome] || ['fire', 'glass'];
+    if (CUSTOM[set]) return { theme_customColorset: { ...CUSTOM[set], name: `${CUSTOM[set].name}_${mat}`, material: mat },
+                              theme_colorset: set, theme_material: mat };
+    return { theme_colorset: set, theme_material: mat };
+  };
+
+  async function garantirBox() {
+    if (box) return box;
+    box = new DiceBox('#dice3d-layer', {
+      assetPath: '/dice3d/', sounds: true, volume: 70, shadows: false,  // LOCAL PATCH: sem sombras (travou o PC em 17/10)
+      theme_surface: 'taverntable', sound_dieMaterial: 'metal',
+      theme_colorset: 'bronze', theme_material: 'metal',
+      gravity_multiplier: 400, strength: 1.3, baseScale: 100,
+    });
+    await box.initialize();
+    return box;
+  }
+
+  const espera = ms => new Promise(r => setTimeout(r, ms));
+
+  // LOCAL PATCH (simultâneo): cada rolagem cai na mesa na hora, junto com as que ainda rolam.
+  let ativos = 0, cadeia = Promise.resolve();
+  async function rolar(r) {
+    const b = await garantirBox();
+    const t = tema(r.who);
+    const chave = t.theme_colorset + '/' + t.theme_material;
+    const vals = r.values.map(Number);
+    // grupos = dados mistos num lançamento só (ex.: 1d20+1d4)
+    const grupos = (r.grupos && r.grupos.length) ? r.grupos : [{ sides: r.sides, values: vals }];
+    const notacao = grupos.map(g => `${g.values.length}d${g.sides}`).join('+') + '@' +
+      grupos.flatMap(g => g.values.map(Number)).join(',');
+    const placa = document.createElement('div');
+    placa.className = 'placa';
+    const quem = r.who || 'Mestre';
+    placa.innerHTML = '<div class="quem"></div><div class="total"></div><div class="det"></div>';
+    placa.querySelector('.quem').textContent = r.label ? `${quem} · ${r.label}` : quem;
+    placa.querySelector('.total').textContent = r.total ?? vals.reduce((a, v) => a + v, 0);
+    placa.querySelector('.det').textContent = grupos.map(g => `${g.values.length}d${g.sides}: ${g.values.join(', ')}`).join(' · ');
+    const d20 = grupos.filter(g => g.sides === 20).flatMap(g => g.values);
+    if (d20.length && d20.length <= 2) {
+      if (d20.includes(20)) placa.classList.add('crit');
+      else if (d20.includes(1)) placa.classList.add('fumble');
+    }
+    ativos++;
+    layer.classList.add('on');
+    // Lançar em série (troca de tema + spawn), mas sem esperar a animação da anterior acabar.
+    // (a promessa da biblioteca de um lançamento antigo nunca resolve se outro entra por cima,
+    //  então a cadeia só espera o spawn, e a plaquinha espera o fim OU 2,2 s, o que vier antes)
+    const lancamento = cadeia.then(async () => {
+      if (chave !== temaAtual) { await b.updateConfig(t); temaAtual = chave; }
+      // LOCAL PATCH (limite): no máximo 6 dados na mesa; passou disso, limpa e lança do zero
+      const naMesa = (b.diceList && b.diceList.length) || 0;
+      const novos = grupos.reduce((a, g) => a + g.values.length, 0);
+      const p = (naMesa && naMesa + novos <= 6) ? b.add(notacao) : b.roll(notacao);
+      return { p: Promise.resolve(p).catch(err => console.warn('[dados3d]', err)) };
+    });
+    cadeia = lancamento.catch(() => {});
+    try { const { p } = await lancamento; await Promise.race([p, espera(2200)]); }
+    catch (err) { console.warn('[dados3d]', err); }
+    plate.appendChild(placa);
+    requestAnimationFrame(() => placa.classList.add('on'));
+    await espera(4500);
+    placa.classList.remove('on');
+    await espera(400);
+    placa.remove();
+    ativos--;
+    if (!ativos) {
+      layer.classList.remove('on');
+      await espera(500);
+      if (!ativos) b.clearDice();
+    }
+  }
+
+  function processar() {
+    while (fila.length) rolar(fila.shift());
+  }
+
+  // Painel de escolha dos sets
+  const btn = document.createElement('button');
+  btn.id = 'dados-btn'; btn.type = 'button'; btn.textContent = '🎲 Dados';
+  btn.title = 'Escolher o set de dados de cada personagem';
+  const pn = document.createElement('div');
+  pn.id = 'dados-painel';
+  document.body.append(btn, pn);
+  const opcoesSet = atual => Object.entries(SETS).map(([g, l]) =>
+    `<optgroup label="${g}">` + l.map(k => `<option value="${k}"${k === atual ? ' selected' : ''}>${NOMES[k] || k}</option>`).join('') + '</optgroup>').join('');
+  const opcoesMat = atual => Object.entries(MATERIAIS).map(([k, n]) =>
+    `<option value="${k}"${k === atual ? ' selected' : ''}>${n}</option>`).join('');
+  function montar() {
+    const m = lerSets();
+    pn.innerHTML = '<h3>Dados de cada um</h3>' + Object.keys(PADRAO).map(nome => {
+      const [set, mat] = m[nome] || PADRAO[nome];
+      return `<div class="linha" data-nome="${nome}"><b>${nome}</b>
+        <select class="set">${opcoesSet(set)}</select>
+        <select class="mat">${opcoesMat(mat)}</select>
+        <button type="button" class="testar" title="Rolar um d20 de teste">🎲</button></div>`;
+    }).join('') + '<div class="rodape"><button type="button" class="restaurar">Voltar ao padrão</button><button type="button" class="fecharp">Fechar</button></div>';
+  }
+  pn.addEventListener('change', e => {
+    const linha = e.target.closest('.linha'); if (!linha) return;
+    const m = lerSets();
+    m[linha.dataset.nome] = [linha.querySelector('.set').value, linha.querySelector('.mat').value];
+    gravarSets(m);
+  });
+  pn.addEventListener('click', e => {
+    if (e.target.classList.contains('testar')) {
+      const nome = e.target.closest('.linha').dataset.nome;
+      const v = 1 + Math.floor(Math.random() * 20);
+      window._onDice3d({ who: nome, sides: 20, values: [v], total: v, label: 'teste' });
+    } else if (e.target.classList.contains('restaurar')) {
+      gravarSets({}); montar();
+    } else if (e.target.classList.contains('fecharp')) {
+      pn.classList.remove('on');
+    }
+  });
+  btn.onclick = () => { montar(); pn.classList.toggle('on'); };
+
+  window._onDice3d = r => {
+    if (document.body.classList.contains('input-only')) return;
+    if (!r || !Array.isArray(r.values) || !r.values.length) return;
+    fila.push(r);
+    processar();
+  };
+</script>
+<!-- LOCAL PATCH: caderno tático do grupo (sempre à mão na tela) -->
+<style>
+  #caderno-btn { position: fixed; left: 118px; bottom: 56px; z-index: 8400; padding: .45em .9em;
+    background: rgba(25, 20, 14, .85); color: #e9dcc0; border: 1px solid #6d5a3a; border-radius: 4px;
+    font: .85rem Georgia, serif; cursor: pointer; }
+  #caderno-btn:hover { border-color: #d9b36a; }
+  #caderno { position: fixed; inset: 0; z-index: 9000; display: none; background: rgba(10, 8, 5, .88);
+    font: .95rem Georgia, serif; color: #e9dcc0; }
+  #caderno.on { display: grid; grid-template-columns: 240px 1fr; }
+  #caderno nav { overflow-y: auto; padding: 18px 12px; border-right: 1px solid #4a3d28; background: rgba(20,16,11,.95); }
+  #caderno nav h3 { margin: 0 0 10px; font-weight: normal; color: #d9b36a; }
+  #caderno nav .tema { margin: 14px 0 4px; font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: #a8987a; }
+  #caderno nav button { display: block; width: 100%; text-align: left; margin: 3px 0; padding: 6px 8px; cursor: pointer;
+    background: transparent; color: #e9dcc0; border: 1px solid transparent; border-radius: 3px; font: inherit; }
+  #caderno nav button.on, #caderno nav button:hover { border-color: #6d5a3a; background: #2a2219; }
+  #caderno main { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; min-width: 0; }
+  #caderno main img { max-width: 100%; max-height: calc(100vh - 90px); box-shadow: 0 10px 50px rgba(0,0,0,.7); border-radius: 2px; }
+  #caderno main p { margin: 10px 0 0; color: #c9b996; font-style: italic; text-align: center; }
+  #caderno .fechar { position: absolute; top: 10px; right: 14px; background: none; border: 0; color: #e9dcc0; font-size: 1.8rem; cursor: pointer; }
+  #caderno .vazio { color: #a8987a; }
+  body.input-only #caderno-btn { display: none; }
+  @media (max-width: 700px) { #caderno.on { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } #caderno nav { max-height: 30vh; } }
+</style>
+<script>
+(() => {
+  const btn = document.createElement('button');
+  btn.id = 'caderno-btn'; btn.type = 'button'; btn.textContent = '📜 Caderno';
+  btn.title = 'Caderno tático do grupo (C)';
+  const cx = document.createElement('div');
+  cx.id = 'caderno';
+  cx.innerHTML = '<nav></nav><main><button class="fechar" title="Fechar (Esc)">×</button><img alt=""><p></p></main>';
+  document.body.append(btn, cx);
+  const nav = cx.querySelector('nav'), img = cx.querySelector('main img'), leg = cx.querySelector('main p');
+  let paginas = [], atual = 0;
+
+  function ver(i) {
+    if (!paginas.length) return;
+    atual = (i + paginas.length) % paginas.length;
+    const pg = paginas[atual];
+    img.src = '/galeria-tatica/' + encodeURIComponent(pg.arquivo) + '?v=' + encodeURIComponent(pg.publicado || '');
+    leg.textContent = pg.titulo + (pg.nota ? ' — ' + pg.nota : '');
+    nav.querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.i === atual));
+  }
+
+  async function abrir() {
+    try {
+      const r = await fetch('/galeria-tatica/galeria.json', { cache: 'no-store' });
+      paginas = r.ok ? await r.json() : [];
+    } catch (_) { paginas = []; }
+    let html = '<h3>Caderno do Mira</h3>', tema = null;
+    paginas.forEach((pg, i) => {
+      if (pg.lugar !== tema) { tema = pg.lugar; html += `<div class="tema">${tema}</div>`; }
+      html += `<button type="button" data-i="${i}">${pg.titulo}</button>`;
+    });
+    nav.innerHTML = paginas.length ? html : html + '<p class="vazio">Nenhuma página ainda.</p>';
+    cx.classList.add('on');
+    ver(Math.min(atual, paginas.length - 1));
+  }
+  const fechar = () => cx.classList.remove('on');
+
+  btn.onclick = () => cx.classList.contains('on') ? fechar() : abrir();
+  nav.addEventListener('click', e => { const b = e.target.closest('button[data-i]'); if (b) ver(+b.dataset.i); });
+  cx.querySelector('.fechar').onclick = fechar;
+  cx.addEventListener('click', e => { if (e.target === cx || e.target.tagName === 'MAIN') fechar(); });
+  document.addEventListener('keydown', e => {
+    if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) return;
+    if (cx.classList.contains('on')) {
+      if (e.key === 'Escape') fechar();
+      else if (e.key === 'ArrowRight') ver(atual + 1);
+      else if (e.key === 'ArrowLeft') ver(atual - 1);
+    } else if (e.key === 'c' || e.key === 'C') { if (!e.ctrlKey && !e.metaKey && !e.altKey) abrir(); }
+  });
+})();
+</script>
+<script src="/icons/mu-skin.js"></script>
 </body>
 </html>

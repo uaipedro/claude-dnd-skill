@@ -8,7 +8,8 @@ random when the server is down (and the server itself auto-rolls when no
 phone is connected — so rolling never blocks).
 
 Usage:
-    python3 dice.py <notation> [--silent] [--label "..."] [--auto]
+    python3 dice.py <notation> [--silent] [--label "..."] [--auto] [--tela [--quem Nome]]
+    --tela   mostra a rolagem como dados 3D na tela (display); omitir em rolagens secretas
 
 Notation supported:
     d20               single d20
@@ -168,6 +169,38 @@ def _to_server_notation(num_dice: int, die_size: int, mod: int,
 # Main run() — physical first, local fallback
 # --------------------------------------------------------------------------
 
+# LOCAL PATCH: dados 3D na tela do display (--tela [--quem Nome])
+_ULTIMA: dict = {}
+
+
+def mostrar_na_tela(who: str, label: str) -> None:
+    """Manda a última rolagem para a tela (localhost:5001) como dados 3D. Falha calada."""
+    if not _ULTIMA:
+        return
+    disp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "display")
+    try:
+        scheme = open(os.path.join(disp, ".scheme")).read().strip() or "http"
+    except OSError:
+        scheme = "http"
+    token = ""
+    for tf in (os.path.expanduser("~/.claude/dnd/.runtime/.token"), os.path.join(disp, ".token")):
+        try:
+            token = open(tf).read().strip()
+            break
+        except OSError:
+            pass
+    body = dict(_ULTIMA, who=who, label=label)
+    req = urllib.request.Request(
+        f"{scheme}://localhost:5001/dice3d", data=json.dumps(body).encode(), method="POST",
+        headers={"content-type": "application/json", **({"X-DND-Token": token} if token else {})})
+    try:
+        import ssl
+        ctx = ssl._create_unverified_context() if scheme == "https" else None
+        urllib.request.urlopen(req, timeout=2, context=ctx).read()
+    except Exception as e:
+        print(f"dice.py: tela indisponível ({e})", file=sys.stderr)
+
+
 def run(notation: str, silent: bool = False, label: str = "",
         force_local: bool = False, player: str = None) -> int:
     num_dice, die_size, modifier, keep_mode, keep_count, adv, dis = parse_notation(notation)
@@ -191,6 +224,7 @@ def run(notation: str, silent: bool = False, label: str = "",
             if result is not None:
                 _print_physical(result, num_dice, die_size, modifier, keep_mode, keep_count,
                                 adv, dis, silent)
+                _ULTIMA.update(sides=die_size, values=result["rolls"], total=result["total"])
                 return result["total"]
         # fall through to local fallback
 
@@ -207,6 +241,7 @@ def run(notation: str, silent: bool = False, label: str = "",
             print(f"[{lbl}] Roll B: {roll_b} = {total_b}{format_modifier(modifier)}")
             taken = "A" if (adv and total_a >= total_b) or (dis and total_a <= total_b) else "B"
             print(f"Takes roll {taken} → Total: {chosen}")
+        _ULTIMA.update(sides=die_size, values=roll_a + roll_b, total=chosen)
         return chosen
 
     rolls = roll_dice(num_dice, die_size)
@@ -221,6 +256,7 @@ def run(notation: str, silent: bool = False, label: str = "",
             drop_str = f"  (dropped: {dropped})" if dropped else ""
             print(f"Rolls: {rolls}{drop_str}")
             print(f"Kept ({keep_mode}{keep_count}): [{kept_str}]{format_modifier(modifier)} = {result}")
+        _ULTIMA.update(sides=die_size, values=rolls, total=result)
         return result
 
     result = sum(rolls) + modifier
@@ -235,6 +271,7 @@ def run(notation: str, silent: bool = False, label: str = "",
             print(f"Roll: {raw}{format_modifier(modifier)} = {result}{flag}")
         else:
             print(f"Rolls: {rolls}{format_modifier(modifier)} = {result}")
+    _ULTIMA.update(sides=die_size, values=rolls, total=result)
     return result
 
 
@@ -300,6 +337,13 @@ if __name__ == "__main__":
     label = ""
     player = None
     # Extract --label and --player (each followed by a value)
+    tela = "--tela" in argv
+    quem = "Mestre"
+    if "--quem" in argv:
+        i = argv.index("--quem")
+        if i + 1 < len(argv):
+            quem = argv[i + 1]
+            del argv[i:i + 2]
     for flag in ("--label", "--player"):
         if flag in argv:
             i = argv.index(flag)
@@ -310,7 +354,7 @@ if __name__ == "__main__":
                 else:
                     player = val
                 del argv[i:i + 2]
-    args = [a for a in argv if a not in ("--silent", "--auto")]
+    args = [a for a in argv if a not in ("--silent", "--auto", "--tela")]
 
     if not args:
         print("Usage: python3 dice.py <notation>  e.g. d20+5  2d6  4d6kh3  d20 adv")
@@ -318,5 +362,7 @@ if __name__ == "__main__":
 
     notation = " ".join(args)
     result = run(notation, silent=silent, label=label, force_local=auto, player=player)
+    if tela:
+        mostrar_na_tela(quem, label)
     if silent:
         print(result)

@@ -1198,11 +1198,126 @@ def index():
     )
 
 
+# LOCAL PATCH: dados 3D na tela (dice-box-threejs em display/dice3d/)
+@app.route("/dice3d/<path:filename>")
+def serve_dice3d(filename):
+    _d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dice3d")
+    return send_from_directory(_d, filename)
+
+
+def _dice3d_payload(who: str, sides: int, values: list, total, label: str = "") -> dict:
+    vals = [int(v) for v in values][:20]
+    return {"dice3d": {"who": who[:50], "sides": int(sides), "values": vals,
+                       "total": total, "label": label[:60]}}
+
+
+def _grupos_ok(grupos) -> list:
+    """LOCAL PATCH (bateria): [{sides, values}] de uma rolagem com dados mistos (ex.: d20 + d4)."""
+    out = []
+    for g in (grupos or [])[:6]:
+        sides = int(g.get("sides", 20))
+        vals = [int(v) for v in g.get("values", [])][:20]
+        if sides in (4, 6, 8, 10, 12, 20, 100) and vals and all(1 <= v <= sides for v in vals):
+            out.append({"sides": sides, "values": vals})
+    return out
+
+
+@app.route("/dice3d", methods=["POST"])
+def dice3d_roll():
+    """Mostra uma rolagem já decidida (pelo dice.py do Mestre) como dados 3D na tela."""
+    if not _token_ok():
+        return "Forbidden", 403
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        sides = int(data.get("sides", 20))
+        values = [int(v) for v in data.get("values", [])]
+    except (TypeError, ValueError):
+        return jsonify({"error": "bad values"}), 400
+    if sides not in (4, 6, 8, 10, 12, 20, 100) or not values or any(v < 1 or v > sides for v in values):
+        return jsonify({"error": "bad dice"}), 400
+    payload = _dice3d_payload(str(data.get("who", "Mestre")), sides, values,
+                              data.get("total"), str(data.get("label", "")))
+    try:
+        grupos = _grupos_ok(data.get("grupos"))
+    except (TypeError, ValueError, AttributeError):
+        grupos = []
+    if grupos:
+        payload["dice3d"]["grupos"] = grupos
+    _broadcast(payload)
+    return jsonify({"ok": True}), 200
+
+
 @app.route("/icons/<path:filename>")
 def serve_icon(filename):
     """Serve icons, favicon, and brand assets from display/icons/."""
     _icons_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
     return send_from_directory(_icons_dir, filename)
+
+
+# LOCAL PATCH: character portraits from <campaign>/portraits.json
+def _portrait_table():
+    import json as _json
+    name = _active_campaign_name()
+    if not name:
+        return None, {}
+    try:
+        camp = _find_campaign(name)
+        return camp, _json.loads((camp / "portraits.json").read_text(encoding="utf-8"))
+    except Exception:
+        return None, {}
+
+
+# LOCAL PATCH: galeria de lugares (<campanha>/galeria/ + galeria.json)
+@app.route("/galeria/<path:filename>")
+def galeria_file(filename):
+    name = _active_campaign_name()
+    if not name:
+        return "Not Found", 404
+    return send_from_directory(str(_find_campaign(name) / "galeria"), filename)
+
+
+# LOCAL PATCH: segunda galeria (anotações táticas, <campanha>/galeria-tatica/)
+@app.route("/galeria-tatica/<path:filename>")
+def galeria_tatica_file(filename):
+    name = _active_campaign_name()
+    if not name:
+        return "Not Found", 404
+    return send_from_directory(str(_find_campaign(name) / "galeria-tatica"), filename)
+
+
+@app.route("/cena-imagem", methods=["POST"])
+def cena_imagem():
+    """Mostra (ou esconde, com {"esconder": true}) uma imagem da galeria na tela."""
+    if not _token_ok():
+        return "Forbidden", 403
+    data = request.get_json(force=True, silent=True) or {}
+    if data.get("esconder"):
+        _broadcast({"cena_imagem": None})
+        return jsonify({"ok": True}), 200
+    arquivo = str(data.get("arquivo", "")).strip()
+    if not arquivo or "/" in arquivo or arquivo.startswith("."):
+        return jsonify({"error": "arquivo inválido"}), 400
+    _broadcast({"cena_imagem": {
+        "url": f"/{'galeria-tatica' if data.get('colecao') == 'taticas' else 'galeria'}/{arquivo}",
+        "titulo": str(data.get("titulo", ""))[:120],
+        "credito": str(data.get("credito", ""))[:200],
+    }})
+    return jsonify({"ok": True}), 200
+
+
+@app.route("/portraits")
+def portraits_index():
+    _camp, table = _portrait_table()
+    return jsonify({k: f"/portrait/{i}" for i, k in enumerate(table)})
+
+
+@app.route("/portrait/<int:idx>")
+def portrait_file(idx):
+    camp, table = _portrait_table()
+    files = list(table.values())
+    if camp is None or idx < 0 or idx >= len(files):
+        return "Not Found", 404
+    return send_from_directory(str(camp), files[idx])
 
 
 @app.route("/favicon.ico")
@@ -1956,6 +2071,8 @@ def tts_synthesize():
         text = text[: _tts.MAX_TEXT_CHARS]
     if voice not in _tts.VALID_VOICES:
         voice = _tts.DEFAULT_VOICE
+    # LOCAL PATCH: per-character voice from <campaign>/voices.json
+    voice = _tts.voice_for(data.get("speaker"), voice) or voice
     if _tts.key_source() == "unset":
         return "TTS not configured (see docs/SKILL-tts.md)", 503
     try:
@@ -2174,6 +2291,8 @@ def player_dice():
     _persist_log()
     _persist_tail()
     _broadcast(payload)
+    if n_sides in (4, 6, 8, 10, 12, 20, 100):  # LOCAL PATCH: dados 3D na tela
+        _broadcast(_dice3d_payload(character, n_sides, both or rolls, total, label))
 
     # Correlate against any pending DM request. Case-insensitive match on the
     # character name — drop them from the request's expected-rollers set.

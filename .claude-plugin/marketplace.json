@@ -1,11 +1,11 @@
 {
-  "name": "neural-initiative",
+  "name": "mesa-ptbr",
   "owner": {
-    "name": "Neural Initiative",
-    "url": "https://github.com/neuralinitiative"
+    "name": "uaipedro",
+    "url": "https://github.com/uaipedro"
   },
   "metadata": {
-    "description": "Neural Initiative's Claude Code plugins.",
+    "description": "Fork do dm:dnd da Neural Initiative com tela em pt-BR, dados 3D, vozes via OpenRouter, galeria e caderno tático.",
     "version": "1.0.0"
   },
   "plugins": [
@@ -13,9 +13,16 @@
       "name": "dm",
       "source": "./",
       "description": "Dungeon Master assistant for persistent D&D 5e campaigns — campaign/character management, combat, NPCs, dice, an optional live display companion, and full session state across sessions.",
-      "version": "2.4.0",
+      "version": "2.4.0-mesa.1",
       "license": "AGPL-3.0-or-later",
-      "keywords": ["dnd", "dungeons-and-dragons", "ttrpg", "5e", "dungeon-master", "game"]
+      "keywords": [
+        "dnd",
+        "dungeons-and-dragons",
+        "ttrpg",
+        "5e",
+        "dungeon-master",
+        "game"
+      ]
     }
   ]
 }

@@ -1,0 +1,199 @@
+{
+ "_como": "Catálogo da skin MU. 'chave' casa por trecho do nome do item no inventário (sem acento, minúsculo). slot = onde fica equipado; w/h = tamanho na grade; raridade: comum | excelente | antigo | magico | missao.",
+ "itens": [
+  {
+   "chave": "besta leve",
+   "nome": "Besta Leve +1 (Repetidora)",
+   "slot": "arma",
+   "w": 2,
+   "h": 3,
+   "raridade": "magico",
+   "tipo": "Arma à distância · simples",
+   "linhas": [
+    "Dano: 1d8+4 perfurante",
+    "Alcance: 80/320 ft",
+    "Ataque: +6",
+    "Sem recarga: cria a própria munição"
+   ],
+   "opcoes": [
+    "Atirador Exímio: -5 no ataque / +10 no dano",
+    "Ignora cobertura parcial e 3/4"
+   ],
+   "desc": "A arma de sempre. Armada, pronta, mira firme.",
+   "img": "/icons/mu/besta.png"
+  },
+  {
+   "chave": "adaga",
+   "nome": "Adaga",
+   "img": "/icons/mu/adaga.png",
+   "slot": "secundaria",
+   "w": 1,
+   "h": 2,
+   "raridade": "comum",
+   "tipo": "Arma simples · corpo a corpo",
+   "linhas": [
+    "Dano: 1d4+3 perfurante",
+    "Ataque: +5",
+    "Acuidade, leve",
+    "Arremesso 20/60 ft"
+   ]
+  },
+  {
+   "chave": "couro batido",
+   "nome": "Couro Batido",
+   "slot": "armadura",
+   "w": 2,
+   "h": 3,
+   "raridade": "comum",
+   "tipo": "Armadura leve",
+   "linhas": [
+    "CA 12 + Des",
+    "Sem desvantagem em Furtividade"
+   ],
+   "img": "/icons/mu/couro.png"
+  },
+  {
+   "chave": "virote",
+   "nome": "Virotes",
+   "w": 1,
+   "h": 2,
+   "raridade": "comum",
+   "tipo": "Munição",
+   "desc": "Recupere metade depois da luta, se der tempo.",
+   "img": "/icons/mu/virotes.png"
+  },
+  {
+   "chave": "pocao",
+   "nome": "Poção de Cura",
+   "img": "/icons/mu/pocao.png",
+   "w": 1,
+   "h": 1,
+   "raridade": "magico",
+   "tipo": "Poção · consumível",
+   "linhas": [
+    "Recupera 2d4+2 PV",
+    "Ação para beber"
+   ],
+   "desc": "Num cantil amassado, achada no campo de cacos."
+  },
+  {
+   "chave": "fogo alquimico",
+   "nome": "Fogo Alquímico",
+   "w": 1,
+   "h": 1,
+   "raridade": "excelente",
+   "tipo": "Arremesso · consumível",
+   "linhas": [
+    "Ataque improvisado, 20 ft",
+    "1d4 de fogo por turno",
+    "CD 10 Des pra apagar"
+   ],
+   "desc": "Escondido no salto da bota esquerda.",
+   "img": "/icons/mu/fogo.png"
+  },
+  {
+   "chave": "ferramentas de ladrao",
+   "nome": "Ferramentas de Ladrão",
+   "w": 2,
+   "h": 1,
+   "raridade": "comum",
+   "tipo": "Ferramenta",
+   "linhas": [
+    "Proficiente"
+   ],
+   "desc": "Gazuas, lima fina, espelhinho.",
+   "img": "/icons/mu/ferramentas.png"
+  },
+  {
+   "chave": "kit de explorador",
+   "nome": "Kit de Explorador",
+   "img": "/icons/mu/mochila.png",
+   "w": 2,
+   "h": 2,
+   "raridade": "comum",
+   "tipo": "Mochila",
+   "linhas": [
+    "Pé de cabra, martelo, 10 pitons",
+    "10 tochas, pederneira",
+    "10 dias de ração, cantil"
+   ],
+   "desc": "Sem a corda, que ficou amarrando Constock."
+  },
+  {
+   "chave": "roupas",
+   "nome": "Roupas Comuns",
+   "w": 2,
+   "h": 2,
+   "raridade": "comum",
+   "tipo": "Vestimenta",
+   "img": "/icons/mu/roupas.png"
+  },
+  {
+   "chave": "corda",
+   "nome": "Corda",
+   "w": 1,
+   "h": 2,
+   "raridade": "comum",
+   "tipo": "Equipamento",
+   "img": "/icons/mu/corda.png"
+  }
+ ],
+ "magias": {
+  "guidance": {
+   "nome": "Orientação",
+   "nivel": 0,
+   "linhas": [
+    "Toque · concentração, 1 min",
+    "+1d4 num teste de atributo"
+   ],
+   "img": "/icons/mu/orientacao.png"
+  },
+  "message": {
+   "nome": "Mensagem",
+   "icone": "💬",
+   "nivel": 0,
+   "linhas": [
+    "120 ft · 1 rodada",
+    "Sussurro que só o alvo ouve"
+   ]
+  },
+  "cure wounds": {
+   "nome": "Curar Ferimentos",
+   "img": "/icons/heal.png",
+   "nivel": 1,
+   "linhas": [
+    "Toque",
+    "Cura 1d8+4"
+   ]
+  },
+  "faerie fire": {
+   "nome": "Fogo das Fadas",
+   "icone": "🟣",
+   "nivel": 1,
+   "linhas": [
+    "60 ft · cubo de 20 ft · concentração",
+    "Salvaguarda de Des CD 14",
+    "Ataques contra os alvos têm vantagem"
+   ]
+  },
+  "longstrider": {
+   "nome": "Passos Longos",
+   "icone": "🥾",
+   "nivel": 1,
+   "linhas": [
+    "Toque · 1 hora",
+    "+10 ft de deslocamento"
+   ]
+  },
+  "detect magic": {
+   "nome": "Detectar Magia",
+   "img": "/icons/mu/detectar.png",
+   "nivel": 1,
+   "ritual": true,
+   "linhas": [
+    "30 ft · concentração, 10 min",
+    "Pode ser ritual (+10 min, sem espaço)"
+   ]
+  }
+ }
+}
