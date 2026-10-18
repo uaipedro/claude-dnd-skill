@@ -1494,6 +1494,22 @@ def chunk():
             _broadcast({"stats": stats_snapshot})
         return "", 204
 
+    # LOCAL PATCH: ilustração no meio do texto (galeria.py ilustrar)
+    if data.get("ilustracao"):
+        il = data["ilustracao"]
+        if not isinstance(il, dict) or not str(il.get("url", "")).startswith(("/galeria/", "/galeria-tatica/")):
+            return "", 204
+        il = {"url": str(il["url"])[:300], "legenda": str(il.get("legenda", ""))[:200]}
+        log_entry = {"ilustracao": il, "text": il["legenda"]}
+        with _text_log_lock:
+            _text_log.append(log_entry)
+        with _tail_lock:
+            _tail_buffer.append(log_entry)
+        _persist_log()
+        _persist_tail()
+        _broadcast(dict(log_entry))
+        return "", 204
+
     if is_xp_award:
         xp_data = data.get("xp_award", {})
         if not isinstance(xp_data, dict):

@@ -3581,6 +3581,11 @@
   body.input-only #phone-status.ps-sending{ opacity:.8; }
   body.input-only #phone-status.ps-resolving{ color:var(--e-accent, #FF7A2D); }
 </style>
+<style>/* LOCAL PATCH: ilustração no texto */
+.ilustracao-block { margin: 1.6em auto; max-width: 92%; text-align: center; }
+.ilustracao-block img { width: 100%; border-radius: 3px; box-shadow: 0 6px 24px rgba(0,0,0,.55); filter: sepia(.08); }
+.ilustracao-block figcaption { margin-top: .5em; font-style: italic; font-size: .85em; letter-spacing: .04em; opacity: .7; }
+</style>
 </head>
 <body>
 
@@ -5241,6 +5246,25 @@ function renderXpBlock(xpData) {
   scrollToBottom();
 }
 
+// LOCAL PATCH: ilustração no meio do texto, como gravura de livro
+function renderIlustracao(il) {
+  _flushForBlock();
+  const fig = document.createElement('figure');
+  fig.className = 'ilustracao-block';
+  const img = document.createElement('img');
+  img.src = il.url; img.alt = il.legenda || ''; img.loading = 'lazy';
+  img.addEventListener('load', () => scrollToBottom());
+  fig.appendChild(img);
+  if (il.legenda) {
+    const cap = document.createElement('figcaption');
+    cap.textContent = il.legenda;
+    fig.appendChild(cap);
+  }
+  textContent.appendChild(fig);
+  _reanchorCursor();
+  scrollToBottom();
+}
+
 // ── Replay batch (reconnect / session resume) ─────────────────────────
 function renderReplayBatch(items) {
   flushNewBlock();
@@ -5256,6 +5280,10 @@ function renderReplayBatch(items) {
     }
     if (item.xp_award) {
       renderXpBlock(item.xp_award);
+      return;
+    }
+    if (item.ilustracao) {
+      renderIlustracao(item.ilustracao);
       return;
     }
     if (!item.text) return;
@@ -7719,6 +7747,8 @@ function connect() {
         _sidebarBtn.classList.add('visible');
         _buildCharTabs(payload.stats.players);
         _modeSwitcherCachePlayers(payload.stats.players);
+        window._grimorioPlayers = payload.stats.players;  // LOCAL PATCH: grimório
+        if (typeof window._onGrimorioStats === 'function') window._onGrimorioStats();
       }
       if (payload.stats.world_time) {
         updateWorldClock(payload.stats.world_time);
@@ -7814,7 +7844,10 @@ function connect() {
     if (payload.xp_award) {
       renderXpBlock(payload.xp_award);
     }
-    if (payload.text && !payload.inspiration_award && !payload.milestone_award && !payload.milestone_spend && !payload.xp_award) {
+    if (payload.ilustracao) {
+      renderIlustracao(payload.ilustracao);
+    }
+    if (payload.text && !payload.ilustracao && !payload.inspiration_award && !payload.milestone_award && !payload.milestone_spend && !payload.xp_award) {
       if (payload.action) {
         renderActionBlock(payload.action, payload.text);
       } else if (payload.player) {
@@ -9077,6 +9110,220 @@ function _initDicePad() {
       else if (e.key === 'ArrowRight') ver(atual + 1);
       else if (e.key === 'ArrowLeft') ver(atual - 1);
     } else if (e.key === 'c' || e.key === 'C') { if (!e.ctrlKey && !e.metaKey && !e.altKey) abrir(); }
+  });
+})();
+</script>
+<!-- LOCAL PATCH: grimório do mago (botão 📖 / tecla G; dados em /icons/grimorio.json) -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Cormorant+Garamond:ital,wght@0,500;0,700;1,500&family=IM+Fell+English+SC&display=swap">
+<style>
+  #grim-btn { position: fixed; left: 228px; bottom: 56px; z-index: 8400; padding: .45em .9em;
+    background: linear-gradient(#4a0f12, #2a0709); color: #f1d98a; border: 1px solid #a8823c; border-radius: 4px;
+    font: .85rem Georgia, serif; cursor: pointer; box-shadow: 0 0 8px rgba(0,0,0,.6); }
+  #grim-btn:hover { border-color: #f1d98a; box-shadow: 0 0 10px rgba(241,217,138,.35); }
+  body.input-only #grim-btn { display: none; }
+  #grimorio { position: fixed; inset: 0; z-index: 9000; display: none; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, rgba(30,8,6,.82), rgba(5,3,2,.94)); padding: 2vh 2vw; }
+  #grimorio.on { display: flex; }
+  #grimorio .livro { --ouro: #c9a14a; --ouro2: #f1d98a; --tinta: #2b1a0e; --rubro: #7a1416;
+    position: relative; width: min(1500px, 96vw); height: min(900px, 92vh); display: grid; grid-template-columns: 1fr 1fr;
+    padding: 22px 26px; border-radius: 10px 14px 14px 10px;
+    background: radial-gradient(circle at 30% 20%, #6b1418, #3a080b 60%, #22040a);
+    box-shadow: inset 0 0 0 2px #1a0306, inset 0 0 0 5px var(--ouro), inset 0 0 0 7px #1a0306, inset 0 0 40px rgba(0,0,0,.8), 0 25px 80px rgba(0,0,0,.85);
+    transform-origin: left center; animation: grimAbre .55s cubic-bezier(.2,.7,.2,1); }
+  @keyframes grimAbre { from { transform: perspective(1800px) rotateY(-28deg) scale(.92); opacity: 0; } to { transform: none; opacity: 1; } }
+  #grimorio .livro::before, #grimorio .livro::after { content: '✦'; position: absolute; color: var(--ouro); font-size: 20px; top: 4px; left: 8px; }
+  #grimorio .livro::after { left: auto; right: 10px; top: auto; bottom: 2px; }
+  #grimorio .pag { position: relative; overflow-y: auto; padding: 28px 34px 30px; color: var(--tinta);
+    font: 500 1.08rem/1.42 'Cormorant Garamond', Georgia, serif;
+    background: radial-gradient(ellipse at 50% 40%, #f4e6c4, #e6d1a0 70%, #cdb27a);
+    box-shadow: inset 0 0 30px rgba(110,70,20,.35); scrollbar-width: thin; scrollbar-color: #a8823c transparent; }
+  #grimorio .esq { border-radius: 4px 0 0 4px; box-shadow: inset -28px 0 30px -18px rgba(70,40,10,.55), inset 0 0 30px rgba(110,70,20,.35); }
+  #grimorio .dir { border-radius: 0 4px 4px 0; box-shadow: inset 28px 0 30px -18px rgba(70,40,10,.55), inset 0 0 30px rgba(110,70,20,.35); }
+  #grimorio .dir.vira { animation: grimVira .35s ease; transform-origin: left center; }
+  @keyframes grimVira { from { transform: perspective(1400px) rotateY(-14deg); opacity: .35; } to { transform: none; opacity: 1; } }
+  #grimorio h1 { font: 700 1.7rem 'Cinzel Decorative', serif; color: var(--rubro); margin: 0; text-align: center; letter-spacing: .02em; }
+  #grimorio .sub { text-align: center; font-style: italic; margin: 2px 0 10px; color: #5a3d1e; }
+  #grimorio .orn { text-align: center; color: #8a6420; letter-spacing: .5em; margin: 4px 0 12px; }
+  #grimorio .stats { display: flex; justify-content: center; gap: 18px; flex-wrap: wrap; font-family: 'IM Fell English SC', serif; font-size: 1.05rem; }
+  #grimorio .stats b { color: var(--rubro); }
+  #grimorio .ward { margin: 14px auto 6px; max-width: 420px; padding: 8px 12px; border: 1px solid #8a6420; border-radius: 6px;
+    background: linear-gradient(rgba(70,120,190,.12), rgba(70,120,190,.04)); text-align: center; }
+  #grimorio .ward .nome { font-family: 'IM Fell English SC', serif; color: #1f3d6b; }
+  #grimorio .ward .barra { height: 10px; margin: 6px 0 4px; border-radius: 5px; background: rgba(43,26,14,.2); overflow: hidden; border: 1px solid #8a6420; }
+  #grimorio .ward .barra i { display: block; height: 100%; background: linear-gradient(90deg, #6fa8e8, #cfe6ff); box-shadow: 0 0 8px #9cc8ff; transition: width .5s; }
+  #grimorio .ward small { display: block; font-style: italic; color: #5a3d1e; font-size: .85rem; }
+  #grimorio .abas { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; margin: 14px 0 8px; }
+  #grimorio .abas button { font: 1rem 'IM Fell English SC', serif; color: #f1d98a; cursor: pointer; padding: 4px 12px 6px;
+    background: linear-gradient(#7a1416, #4a0b0d); border: 1px solid #a8823c; border-radius: 3px 3px 10px 10px; }
+  #grimorio .abas button.on { background: linear-gradient(#a8823c, #6f5222); color: #fff6d8; }
+  #grimorio .nivel { margin: 14px 0 4px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    font: 1.15rem 'IM Fell English SC', serif; color: var(--rubro); border-bottom: 1px solid #a8823c; padding-bottom: 3px; }
+  #grimorio .velas { display: inline-flex; gap: 5px; margin-left: auto; }
+  #grimorio .vela { width: 14px; height: 14px; border-radius: 50%; border: 1px solid #6f5222;
+    background: radial-gradient(circle at 35% 30%, #fff3c0, #f0a020 45%, #a83a10); box-shadow: 0 0 8px 2px rgba(255,170,40,.7);
+    animation: grimChama 2.4s ease-in-out infinite; }
+  #grimorio .vela.gasta { background: radial-gradient(circle at 35% 30%, #8a7a66, #4a3f33); box-shadow: none; animation: none; opacity: .7; }
+  @keyframes grimChama { 50% { box-shadow: 0 0 12px 4px rgba(255,190,60,.85); } }
+  #grimorio ul { list-style: none; margin: 0; padding: 0; }
+  #grimorio li button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 5px 6px; cursor: pointer; text-align: left;
+    background: none; border: 0; border-radius: 4px; font: inherit; color: inherit; }
+  #grimorio li button:hover, #grimorio li button.on { background: rgba(122,20,22,.12); }
+  #grimorio li .tags { margin-left: auto; font-size: .8rem; color: #6f5222; font-family: 'IM Fell English SC', serif; }
+  #grimorio .selo { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 15px;
+    color: #fff6d8; border: 2px solid #c9a14a; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+  #grimorio .abj { box-shadow: 0 0 0 2px rgba(80,140,220,.5), 0 0 10px rgba(80,140,220,.7); }
+  #grimorio li .abjtxt { color: #1f3d6b; }
+  #grimorio .det h2 { font: 700 1.6rem 'Cinzel Decorative', serif; color: var(--rubro); margin: 4px 0 0; }
+  #grimorio .det .orig { font-style: italic; color: #5a3d1e; }
+  #grimorio .det .cab { display: flex; align-items: center; gap: 14px; }
+  #grimorio .det .cab .selo { width: 58px; height: 58px; font-size: 28px; }
+  #grimorio .det .linha { font-family: 'IM Fell English SC', serif; color: #5a3d1e; margin: 8px 0 12px; }
+  #grimorio .det dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 10px 0; }
+  #grimorio .det dt { font-family: 'IM Fell English SC', serif; color: var(--rubro); }
+  #grimorio .det dd { margin: 0; }
+  #grimorio .det .efeito { margin-top: 14px; font-size: 1.15rem; }
+  #grimorio .det .efeito::first-letter { float: left; font: 700 3.1rem/0.9 'Cinzel Decorative', serif; color: var(--rubro); margin: 4px 6px 0 0; }
+  #grimorio .det .selo-ward { margin-top: 16px; padding: 8px 12px; border-left: 3px solid #4f7fc0; background: rgba(80,140,220,.1); font-style: italic; }
+  #grimorio .det .vazio { text-align: center; margin-top: 30%; font-style: italic; color: #6f5222; }
+  #grimorio .fechar { position: absolute; top: -6px; right: -6px; width: 38px; height: 38px; border-radius: 50%; cursor: pointer; z-index: 2;
+    background: #3a080b; color: #f1d98a; border: 2px solid #c9a14a; font-size: 1.3rem; }
+  #grimorio .voltar { display: none; }
+  @media (max-width: 800px) {
+    #grimorio { padding: 0; }
+    #grimorio .livro { width: 100vw; height: 100dvh; grid-template-columns: 1fr; padding: 10px; border-radius: 0; }
+    #grimorio .pag { padding: 18px 16px; }
+    #grimorio .dir { display: none; }
+    #grimorio.det-on .esq { display: none; }
+    #grimorio.det-on .dir { display: block; border-radius: 4px; }
+    #grimorio .voltar { display: inline-block; margin-bottom: 8px; font: 1rem 'IM Fell English SC', serif; background: none; border: 1px solid #8a6420; border-radius: 3px; padding: 2px 10px; color: var(--tinta); }
+    #grimorio .fechar { top: 4px; right: 4px; }
+    #grim-btn { left: auto; right: 12px; bottom: 100px; }
+  }
+  @media (prefers-reduced-motion: reduce) { #grimorio .livro, #grimorio .dir.vira, #grimorio .vela { animation: none; } }
+</style>
+<script>
+(() => {
+  const ESCOLAS = {
+    abjuracao:    { nome: 'Abjuração',    s: '⛨', c: '#2f5d9a' },
+    adivinhacao:  { nome: 'Adivinhação',  s: '👁', c: '#5a6f7a' },
+    conjuracao:   { nome: 'Conjuração',   s: '✶', c: '#6b4a8a' },
+    encantamento: { nome: 'Encantamento', s: '❦', c: '#a0306a' },
+    evocacao:     { nome: 'Evocação',     s: 'ϟ', c: '#b0461a' },
+    ilusao:       { nome: 'Ilusão',       s: '☾', c: '#4a4a9a' },
+    necromancia:  { nome: 'Necromancia',  s: '☠', c: '#2f3a2a' },
+    transmutacao: { nome: 'Transmutação', s: '⚗', c: '#5f7a2a' },
+  };
+  const NIVEIS = ['Truques', '1º Círculo', '2º Círculo', '3º Círculo', '4º Círculo', '5º Círculo', '6º Círculo', '7º Círculo', '8º Círculo', '9º Círculo'];
+  const esc = t => String(t ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+
+  const btn = document.createElement('button');
+  btn.id = 'grim-btn'; btn.type = 'button'; btn.textContent = '📖 Grimório'; btn.title = 'Grimório do mago (G)';
+  const gx = document.createElement('div');
+  gx.id = 'grimorio';
+  gx.innerHTML = '<div class="livro" role="dialog" aria-label="Grimório"><button class="fechar" title="Fechar (Esc)">×</button>' +
+    '<section class="pag esq"></section><section class="pag dir det"></section></div>';
+  document.body.append(btn, gx);
+  const esq = gx.querySelector('.esq'), dir = gx.querySelector('.dir');
+  let dados = null, filtro = 'todos', sel = null;
+
+  function jogador() {
+    const ps = window._grimorioPlayers || [];
+    return ps.find(p => /caspio/i.test(p.name || '')) || ps.find(p => p.spell_slots && Object.keys(p.spell_slots).length) || null;
+  }
+  function wardAtual(p) {
+    const w = p && (p.arcane_ward || (p.sheet && p.sheet.arcane_ward));
+    const max = (w && w.max) || dados.ward?.max || 0;
+    const cur = w && w.current != null ? w.current : (w && w.hp != null ? w.hp : null);
+    return { max, cur };
+  }
+  function velas(p, n) {
+    const s = p && p.spell_slots && (p.spell_slots[n] || p.spell_slots[String(n)]);
+    if (!s || !s.max) return '';
+    const livres = Math.max(0, s.max - (s.used || 0));
+    let h = '<span class="velas" title="' + livres + ' de ' + s.max + ' espaços">';
+    for (let i = 0; i < s.max; i++) h += '<i class="vela' + (i < livres ? '' : ' gasta') + '"></i>';
+    return h + '</span>';
+  }
+  function selo(m, extra) {
+    const e = ESCOLAS[m.escola] || { s: '✧', c: '#6f5222', nome: m.escola };
+    return '<span class="selo' + (m.escola === 'abjuracao' ? ' abj' : '') + (extra || '') + '" style="background:' + e.c + '" title="' + esc(e.nome) + '">' + e.s + '</span>';
+  }
+
+  function renderEsq() {
+    const p = jogador(), w = wardAtual(p);
+    let h = '<h1>' + esc(dados.titulo) + '</h1><div class="sub">' + esc(dados.subtitulo || '') + '</div>';
+    h += '<div class="stats"><span>CD <b>' + esc(dados.cd) + '</b></span><span>Ataque mágico <b>' + esc(dados.ataque) + '</b></span>' +
+      (p && p.concentration ? '<span>Concentrado: <b>' + esc(p.concentration) + '</b></span>' : '') + '</div>';
+    if (dados.ward) {
+      const pct = w.cur == null || !w.max ? 100 : Math.max(0, Math.min(100, 100 * w.cur / w.max));
+      h += '<div class="ward"><span class="nome">⛨ ' + esc(dados.ward.nome) + ' — ' + (w.cur == null ? '' : w.cur + ' / ') + w.max + ' PV</span>' +
+        '<div class="barra"><i style="width:' + pct + '%"></i></div><small>' + esc(dados.ward.regra || '') + '</small></div>';
+    }
+    const niveis = [...new Set(dados.magias.map(m => m.nivel))].sort((a, b) => a - b);
+    h += '<div class="orn">❧ ✦ ☙</div><div class="abas"><button data-f="todos" class="' + (filtro === 'todos' ? 'on' : '') + '">Todas</button>';
+    niveis.forEach(n => h += '<button data-f="' + n + '" class="' + (String(filtro) === String(n) ? 'on' : '') + '">' + (n ? n + 'º' : 'Truques') + '</button>');
+    h += '<button data-f="abj" class="' + (filtro === 'abj' ? 'on' : '') + '">⛨ Abjuração</button></div>';
+    niveis.forEach(n => {
+      const ms = dados.magias.filter(m => m.nivel === n && (filtro === 'todos' || String(filtro) === String(n) || (filtro === 'abj' && m.escola === 'abjuracao')));
+      if (!ms.length) return;
+      h += '<div class="nivel">' + NIVEIS[n] + (n ? velas(p, n) : '') + '</div><ul>';
+      ms.forEach(m => {
+        const i = dados.magias.indexOf(m);
+        const tags = [m.concentracao ? 'C' : '', m.ritual ? 'R' : '', m.ward ? '⛨' : ''].filter(Boolean).join(' · ');
+        h += '<li><button data-i="' + i + '" class="' + (sel === i ? 'on' : '') + '">' + selo(m) +
+          '<span class="' + (m.escola === 'abjuracao' ? 'abjtxt' : '') + '">' + esc(m.nome) + '</span><span class="tags">' + tags + '</span></button></li>';
+      });
+      h += '</ul>';
+    });
+    esq.innerHTML = h;
+  }
+
+  function renderDir(animar) {
+    if (sel == null) {
+      dir.innerHTML = '<div class="vazio">❦<br>Escolha uma magia na página ao lado<br>para ler sua fórmula.</div>';
+    } else {
+      const m = dados.magias[sel], e = ESCOLAS[m.escola] || { nome: m.escola };
+      const linha = (m.nivel ? m.nivel + 'º círculo' : 'Truque') + ' · ' + e.nome + (m.ritual ? ' (ritual)' : '');
+      let h = '<button class="voltar">‹ Voltar</button><div class="cab">' + selo(m) + '<div><h2>' + esc(m.nome) + '</h2><div class="orig">' + esc(m.original || '') + '</div></div></div>';
+      h += '<div class="linha">' + esc(linha) + '</div><dl>' +
+        '<dt>Conjuração</dt><dd>' + esc(m.tempo) + '</dd><dt>Alcance</dt><dd>' + esc(m.alcance) + '</dd>' +
+        '<dt>Componentes</dt><dd>' + esc(m.componentes) + '</dd><dt>Duração</dt><dd>' + esc(m.duracao) + (m.concentracao ? ' <b>(concentração)</b>' : '') + '</dd></dl>';
+      h += '<div class="orn">❧ ✦ ☙</div><p class="efeito">' + esc(m.efeito) + '</p>';
+      if (m.acima) h += '<p><b>Em círculos maiores.</b> ' + esc(m.acima) + '</p>';
+      if (m.ward && dados.ward) h += '<div class="selo-ward">⛨ Abjuração: recarrega a ' + esc(dados.ward.nome) + ' em 2 × o nível do espaço usado.</div>';
+      dir.innerHTML = h;
+    }
+    if (animar) { dir.classList.remove('vira'); void dir.offsetWidth; dir.classList.add('vira'); }
+    dir.scrollTop = 0;
+  }
+
+  async function abrir() {
+    try {
+      const r = await fetch('/icons/grimorio.json', { cache: 'no-store' });
+      dados = r.ok ? await r.json() : null;
+    } catch (_) { dados = null; }
+    if (!dados) { dados = { titulo: 'Grimório', magias: [] }; }
+    renderEsq(); renderDir(false);
+    gx.classList.add('on');
+  }
+  const fechar = () => gx.classList.remove('on', 'det-on');
+  window._onGrimorioStats = () => { if (gx.classList.contains('on') && dados) renderEsq(); };
+
+  btn.onclick = () => gx.classList.contains('on') ? fechar() : abrir();
+  gx.querySelector('.fechar').onclick = fechar;
+  gx.addEventListener('click', e => { if (e.target === gx) fechar(); });
+  esq.addEventListener('click', e => {
+    const a = e.target.closest('button[data-f]');
+    if (a) { filtro = a.dataset.f; renderEsq(); return; }
+    const b = e.target.closest('button[data-i]');
+    if (b) { sel = +b.dataset.i; renderEsq(); renderDir(true); gx.classList.add('det-on'); }
+  });
+  dir.addEventListener('click', e => { if (e.target.closest('.voltar')) gx.classList.remove('det-on'); });
+  document.addEventListener('keydown', e => {
+    if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) return;
+    if (gx.classList.contains('on')) {
+      if (e.key === 'Escape') { e.stopImmediatePropagation(); fechar(); }
+    } else if ((e.key === 'g' || e.key === 'G') && !e.ctrlKey && !e.metaKey && !e.altKey) abrir();
   });
 })();
 </script>
