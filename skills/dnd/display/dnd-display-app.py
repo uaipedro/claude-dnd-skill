@@ -1305,6 +1305,110 @@ def cena_imagem():
     return jsonify({"ok": True}), 200
 
 
+# LOCAL PATCH: mapa de batalha ao vivo (<campanha>/mapas/, regras em mapa_estado.py)
+import mapa_estado as _mapa_mod
+
+_mapa_lock = threading.Lock()
+_mapa_cache: dict = {}
+
+
+def _mapa_dir():
+    name = _active_campaign_name()
+    if not name:
+        return None
+    d = _find_campaign(name) / "mapas"
+    d.mkdir(exist_ok=True)
+    return d
+
+
+def _mapa_ler():
+    d = _mapa_dir()
+    if d is None:
+        return None, None
+    if _mapa_cache.get("dir") != str(d):
+        try:
+            est = json.loads((d / "estado.json").read_text(encoding="utf-8"))
+        except Exception:
+            est = None
+        _mapa_cache.update(dir=str(d), est=est)
+    return d, _mapa_cache["est"]
+
+
+def _mapa_gravar(d, est) -> None:
+    tmp = d / "estado.json.tmp"
+    tmp.write_text(json.dumps(est, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(d / "estado.json")
+    _mapa_cache.update(dir=str(d), est=est)
+
+
+@app.route("/mapa", methods=["POST"])
+def mapa_cmd():
+    """Recebe {"cmd": "mv snig>F5; atk snig>caspio"}, {"carregar": "cais"},
+    {"mostrar": true} ou {"esconder": true}. Responde texto curto para o agente
+    e manda o estado e os eventos de animação pelo SSE."""
+    if not _token_ok():
+        return "Forbidden", 403
+    data = request.get_json(force=True, silent=True) or {}
+    with _mapa_lock:
+        d, est = _mapa_ler()
+        if d is None:
+            return "sem campanha ativa (push_stats.py --set-campaign)\n", 409
+        if data.get("esconder"):
+            _broadcast({"mapa": None})
+            return "mapa escondido.\n", 200
+        eventos, abrir = [], bool(data.get("mostrar"))
+        v_antes = (est or {}).get("v")
+        txt = _mapa_mod.resumo(est) if est else ""
+        try:
+            if data.get("carregar"):
+                nome = str(data["carregar"])
+                arq = d / (nome if nome.endswith(".mapa") else nome + ".mapa")
+                if "/" in nome or not arq.exists():
+                    disp = ", ".join(p.stem for p in sorted(d.glob("*.mapa"))) or "nenhum"
+                    return f"cenário {nome!r} não existe em {d} (há: {disp})\n", 404
+                novo = _mapa_mod.carregar_cenario(arq.read_text(encoding="utf-8"))
+                novo["v"] = (est or {}).get("v", 0) + 1
+                novo["base_v"] = (est or {}).get("base_v", 0) + 1
+                est, txt, abrir = novo, "carregado.\n" + _mapa_mod.resumo(novo), True
+                eventos = [{"t": "reset"}]
+            elif est is None:
+                return "nenhum mapa carregado (mapa.py carregar <cenário>)\n", 409
+            elif data.get("cmd"):
+                est, txt, eventos = _mapa_mod.aplicar(est, str(data["cmd"]))
+        except _mapa_mod.ErroMapa as e:
+            return f"ERRO {e}\n", 400
+        if est.get("v") != v_antes:
+            _mapa_gravar(d, est)
+        if est.get("v") != v_antes or abrir:
+            _broadcast({"mapa": {"estado": _mapa_mod.publico(est), "abrir": abrir,
+                                 "eventos": _mapa_mod.eventos_publicos(est, eventos)}})
+    return txt + "\n", 200
+
+
+@app.route("/mapa/estado")
+def mapa_estado_get():
+    _d, est = _mapa_ler()
+    return jsonify(_mapa_mod.publico(est) if est else None)
+
+
+@app.route("/mapa/base.svg")
+def mapa_base_svg():
+    _d, est = _mapa_ler()
+    if not est:
+        return "Not Found", 404
+    return Response(_mapa_mod.svg(est), mimetype="image/svg+xml",
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.route("/mapa/croqui.svg")
+def mapa_croqui_svg():
+    """Croqui com tokens, para guardar no caderno tático."""
+    _d, est = _mapa_ler()
+    if not est:
+        return "Not Found", 404
+    return Response(_mapa_mod.svg(est, com_tokens=True), mimetype="image/svg+xml")
+
+
 @app.route("/portraits")
 def portraits_index():
     _camp, table = _portrait_table()

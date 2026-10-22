@@ -8,6 +8,7 @@ Fork de [neuralinitiative/claude-dnd-skill](https://github.com/neuralinitiative/
 - **Dados 3D na tela.** `display/dice3d/` e `scripts/dice.py`. Permite rolagens simultâneas e tem limite de dados.
 - **Vozes dos NPCs via OpenRouter.** `display/tts.py`, com fila de voz.
 - **Galeria de lugares e caderno tático.** Ficam embutidos na tela: botão 📜 Caderno ou tecla C.
+- **Mapa de batalha ao vivo.** `display/mapa_estado.py` (regras e DSL), `display/mapa.py` (CLI), botão 🗺 Mapa ou tecla M. Cenários em `<campanha>/mapas/`.
 - **Skin MU.** Inventário em grade e ícones, em `display/icons/mu*`.
 - **Ferramentas em `skills/dnd/extras/`:**
   - `rolar.py`: rola dados na tela;

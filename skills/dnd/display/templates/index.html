@@ -7737,6 +7737,9 @@ function connect() {
     if (payload.cena_imagem !== undefined && typeof window._onCenaImagem === 'function') {
       window._onCenaImagem(payload.cena_imagem);  // LOCAL PATCH: galeria
     }
+    if (payload.mapa !== undefined && typeof window._onMapa === 'function') {
+      window._onMapa(payload.mapa);  // LOCAL PATCH: mapa de batalha
+    }
     if (payload.dice3d && typeof window._onDice3d === 'function') {
       window._onDice3d(payload.dice3d);  // LOCAL PATCH: dados 3D
     }
@@ -9003,7 +9006,7 @@ function _initDicePad() {
     `<optgroup label="${g}">` + l.map(k => `<option value="${k}"${k === atual ? ' selected' : ''}>${NOMES[k] || k}</option>`).join('') + '</optgroup>').join('');
   const opcoesMat = atual => Object.entries(MATERIAIS).map(([k, n]) =>
     `<option value="${k}"${k === atual ? ' selected' : ''}>${n}</option>`).join('');
-  function montar() {
+  function montar(movidos = new Set()) {
     const m = lerSets();
     pn.innerHTML = '<h3>Dados de cada um</h3>' + Object.keys(PADRAO).map(nome => {
       const [set, mat] = m[nome] || PADRAO[nome];
@@ -9111,6 +9114,163 @@ function _initDicePad() {
       else if (e.key === 'ArrowLeft') ver(atual - 1);
     } else if (e.key === 'c' || e.key === 'C') { if (!e.ctrlKey && !e.metaKey && !e.altKey) abrir(); }
   });
+})();
+</script>
+<!-- LOCAL PATCH: mapa de batalha ao vivo (botão 🗺 / tecla M; estado no servidor, mapa.py) -->
+<style>
+  #mapa-btn { position: fixed; left: 118px; bottom: 96px; z-index: 8400; padding: .45em .9em;
+    background: rgba(25, 20, 14, .85); color: #e9dcc0; border: 1px solid #6d5a3a; border-radius: 4px;
+    font: .85rem Georgia, serif; cursor: pointer; }
+  #mapa-btn:hover { border-color: #d9b36a; }
+  #mapa-btn.novo { border-color: #d9b36a; box-shadow: 0 0 10px rgba(217,179,106,.6); }
+  body.input-only #mapa-btn { display: none; }
+  #mapa { position: fixed; inset: 0; z-index: 9000; display: none; background: rgba(10, 8, 5, .9);
+    font: .95rem Georgia, serif; color: #e9dcc0; align-items: center; justify-content: center; padding: 14px; }
+  #mapa.on { display: flex; }
+  #mapa .folha { position: relative; max-width: 100%; max-height: 100%; aspect-ratio: var(--ar, 1);
+    height: calc(100vh - 28px); box-shadow: 0 10px 50px rgba(0,0,0,.7); }
+  #mapa .folha > * { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #mapa .fechar { position: absolute; top: 10px; right: 14px; background: none; border: 0; color: #e9dcc0; font-size: 1.8rem; cursor: pointer; z-index: 2; }
+  #mapa .rodada { position: absolute; top: 12px; left: 16px; color: #c9b996; font-style: italic; z-index: 2; }
+  #mapa .tk { transition: transform .16s linear; }
+  #mapa .tk.vez circle.aro { stroke: #d9b36a; stroke-width: 4; filter: drop-shadow(0 0 4px #d9b36a); }
+  #mapa .flash { animation: mapa-some 2.4s ease-out forwards; }
+  #mapa .float { animation: mapa-sobe 1.6s ease-out forwards; }
+  @keyframes mapa-some { 0% { opacity: .55; } 70% { opacity: .35; } 100% { opacity: 0; } }
+  @keyframes mapa-sobe { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-34px); } }
+  @media (max-width: 700px) { #mapa .folha { height: auto; width: 100%; } }
+</style>
+<script>
+(() => {
+  const S = 40, M = 28, NS = 'http://www.w3.org/2000/svg';
+  const COR = { pj: '#2f5d8a', ali: '#3f7a4a', ini: '#8b1a1a' };
+  const btn = document.createElement('button');
+  btn.id = 'mapa-btn'; btn.type = 'button'; btn.textContent = '🗺 Mapa'; btn.title = 'Mapa de batalha (M)';
+  const cx = document.createElement('div');
+  cx.id = 'mapa';
+  cx.innerHTML = '<button class="fechar" title="Fechar (Esc)">×</button><div class="rodada"></div>'
+    + '<div class="folha"><img alt=""><svg></svg></div>';
+  document.body.append(btn, cx);
+  const img = cx.querySelector('img'), svg = cx.querySelector('svg'), folha = cx.querySelector('.folha');
+  const rod = cx.querySelector('.rodada');
+  let est = null, baseV = -1, fila = Promise.resolve();
+  const el = (tag, at = {}, pai = svg) => {
+    const e = document.createElementNS(NS, tag);
+    for (const k in at) e.setAttribute(k, at[k]);
+    pai && pai.appendChild(e); return e;
+  };
+  const centro = p => [p[0] * S + S / 2, p[1] * S + S / 2];
+  const espera = ms => new Promise(r => setTimeout(r, ms));
+  const camadas = {};
+
+  function montar(movidos = new Set()) {
+    const W = est.w * S, H = est.h * S;
+    const vb = `${-M} ${-M} ${W + 2 * M} ${H + 2 * M}`;
+    svg.setAttribute('viewBox', vb);
+    folha.style.setProperty('--ar', (W + 2 * M) / (H + 2 * M));
+    if (est.base_v !== baseV) { baseV = est.base_v; img.src = '/mapa/base.svg?v=' + baseV; }
+    if (!camadas.tk) { svg.innerHTML = ''; camadas.fx = el('g'); camadas.tk = el('g'); camadas.top = el('g'); }
+    rod.textContent = (est.titulo || '') + (est.rodada ? ` · rodada ${est.rodada}` : '')
+      + (est.vez && est.tokens[est.vez] ? ` · vez de ${est.tokens[est.vez].nome}` : '');
+    const vistos = new Set();
+    for (const t of Object.values(est.tokens)) { vistos.add(t.id); desenhar(t, movidos.has(t.id)); }
+    camadas.tk.querySelectorAll('.tk').forEach(g => { if (!vistos.has(g.dataset.id)) g.remove(); });
+  }
+
+  function desenhar(t, vaiAnimar) {
+    let g = camadas.tk.querySelector(`.tk[data-id="${CSS.escape(t.id)}"]`);
+    if (!g) g = el('g', { class: 'tk', 'data-id': t.id }, camadas.tk);
+    if (!g.style.transform || !vaiAnimar) {
+      const [x, y] = centro(t.pos);
+      g.style.transform = `translate(${x}px, ${y}px)`;
+    }
+    g.innerHTML = '';
+    g.classList.toggle('vez', est.vez === t.id);
+    if (t.morto) {
+      el('path', { d: 'M-11 -11 L11 11 M11 -11 L-11 11', stroke: '#2b2116', 'stroke-width': 3.5, 'stroke-linecap': 'round' }, g);
+      return;
+    }
+    el('circle', { r: 16, fill: '#f3e9d0', stroke: COR[t.lado] || '#555', 'stroke-width': 3, class: 'aro' }, g);
+    if (t.hp && t.hp[1]) {
+      const f = Math.max(0, t.hp[0]) / t.hp[1], r = 19, c = 2 * Math.PI * r;
+      el('circle', { r, fill: 'none', stroke: f > .5 ? '#4f8a3a' : f > .25 ? '#c08a1f' : '#b0261c',
+        'stroke-width': 3, 'stroke-dasharray': `${c * f} ${c}`, transform: 'rotate(-90)' }, g);
+    }
+    const ini = el('text', { y: 4, 'text-anchor': 'middle', 'font-size': 11, 'font-family': 'Georgia, serif', fill: '#2b2116' }, g);
+    const pal = (t.nome || t.id).split(/\s+/).filter(Boolean);
+    ini.textContent = (pal.length > 1 ? pal[0][0] + pal[pal.length - 1][0] : pal[0].slice(0, 2)).toUpperCase();
+    const nm = el('text', { y: 31, 'text-anchor': 'middle', 'font-size': 10, 'font-style': 'italic',
+      'font-family': 'Georgia, serif', fill: '#2b2116', stroke: '#eadcb8', 'stroke-width': 3, 'paint-order': 'stroke' }, g);
+    nm.textContent = (t.nome || t.id).split(/\s+/)[0] + (t.cond && t.cond.length ? ' · ' + t.cond.join(', ') : '');
+  }
+
+  async function animar(ev) {
+    const pos = id => est.tokens[id] && centro(est.tokens[id].pos);
+    if (ev.t === 'mv') {
+      const g = camadas.tk.querySelector(`.tk[data-id="${CSS.escape(ev.id)}"]`);
+      if (!g) return;
+      for (const p of ev.rota.slice(1)) {
+        const [x, y] = centro(p);
+        g.style.transform = `translate(${x}px, ${y}px)`;
+        await espera(170);
+      }
+    } else if (ev.t === 'atk') {
+      const a = pos(ev.de), b = pos(ev.para);
+      if (!a || !b) return;
+      const cor = ev.res === 'erro' ? '#6b5a3a' : ev.res === 'crit' ? '#d9a21a' : '#b0261c';
+      const ln = el('line', { x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: cor, 'stroke-width': ev.res === 'crit' ? 5 : 3,
+        'stroke-linecap': 'round', 'stroke-dasharray': '6 5', class: 'flash' }, camadas.top);
+      flutuar(b, ev.res === 'erro' ? 'errou' : ev.dano ? `−${ev.dano}` : ev.res === 'crit' ? 'crítico!' : 'acerto', cor);
+      setTimeout(() => ln.remove(), 2500);
+      await espera(500);
+    } else if (ev.t === 'area' && !ev.fixa) {
+      const g = el('g', { class: 'flash' }, camadas.fx);
+      for (const [x, y] of ev.celulas) el('rect', { x: x * S, y: y * S, width: S, height: S, fill: '#d2471c' }, g);
+      setTimeout(() => g.remove(), 2500);
+      await espera(400);
+    } else if (ev.t === 'dano' || ev.t === 'cura') {
+      const p = pos(ev.id);
+      if (p) flutuar(p, (ev.t === 'dano' ? '−' : '+') + ev.n, ev.t === 'dano' ? '#b0261c' : '#3f7a4a');
+    }
+  }
+
+  function flutuar([x, y], txt, cor) {
+    const g = el('g', { transform: `translate(${x} ${y - 22})` }, camadas.top);
+    const t = el('text', { class: 'float', 'text-anchor': 'middle', 'font-size': 18, 'font-weight': 'bold',
+      'font-family': 'Georgia, serif', fill: cor, stroke: '#f3e9d0', 'stroke-width': 3, 'paint-order': 'stroke' }, g);
+    t.textContent = txt;
+    setTimeout(() => g.remove(), 1700);
+  }
+
+  function receber(m) {
+    if (m === null) { fechar(); return; }
+    fila = fila.then(async () => {
+      if (est && m.estado.v <= est.v && !m.abrir) return;  // mensagem velha fora de ordem
+      const reset = m.eventos.some(e => e.t === 'reset');
+      if (reset) camadas.tk = null;
+      // tokens que já existem mantêm o transform antigo até animar() levá-los pela rota
+      est = m.estado;
+      montar(new Set(m.eventos.filter(e => e.t === 'mv').map(e => e.id)));
+      for (const ev of m.eventos) await animar(ev);
+    }).catch(() => {});
+    if (m.abrir) abrir();
+    else if (!cx.classList.contains('on')) btn.classList.add('novo');
+  }
+
+  function abrir() { if (est) { cx.classList.add('on'); btn.classList.remove('novo'); } }
+  const fechar = () => cx.classList.remove('on');
+  window._onMapa = receber;
+  btn.onclick = () => cx.classList.contains('on') ? fechar() : abrir();
+  cx.querySelector('.fechar').onclick = fechar;
+  cx.addEventListener('click', e => { if (e.target === cx) fechar(); });
+  document.addEventListener('keydown', e => {
+    if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) return;
+    if (cx.classList.contains('on') && e.key === 'Escape') fechar();
+    else if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey && !e.altKey)
+      cx.classList.contains('on') ? fechar() : abrir();
+  });
+  fetch('/mapa/estado', { cache: 'no-store' }).then(r => r.ok ? r.json() : null)
+    .then(s => { if (s) { est = s; montar(); } }).catch(() => {});
 })();
 </script>
 <!-- LOCAL PATCH: grimório do mago (botão 📖 / tecla G; dados em /icons/grimorio.json) -->

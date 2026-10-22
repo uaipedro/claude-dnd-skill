@@ -418,6 +418,22 @@ Step (g) uses `push_stats.py --turn-current` directly because it has no narratio
 
 ---
 
+## Mapa de batalha (mesa-ptbr)
+
+Croqui ao vivo na tela (botão 🗺 Mapa, tecla M). O servidor guarda o estado e calcula as regras. Você manda comandos curtos e lê de volta um resumo em texto. Nunca escreva SVG durante a luta.
+
+1. **Antes do combate**, escreva o cenário em `<campanha>/mapas/<nome>.mapa` (DSL documentada no topo de `display/mapa_estado.py`; tokens podem já vir no arquivo) e rode `mapa.py carregar <nome>`, que abre o mapa na tela.
+2. **Durante o combate**, passe um lote por chamada, **sempre entre aspas simples** (no zsh, `a>B2` sem aspas redireciona a saída):
+   ```bash
+   python3 display/mapa.py 'turno snig; mv snig>F5; atk snig>caspio acerto 7'
+   python3 display/mapa.py 'area cone15 C4>E4 "bafo"'   # diz quem ficou dentro
+   python3 display/mapa.py ver caspio                     # distâncias e adjacentes, sem mexer na tela
+   ```
+   Comandos: `add id@C4:pj|ali|ini:30:a10 "Nome"`, `mv id>F5` (o `!` força além do deslocamento), `rm id [morto]`, `atk a>b acerto|erro|crit [dano]`, `area cone|linha|esfera|cubo<ft> C4[>E4] [fixa]`, `hp id 12/20`, `dano`/`cura id N`, `cond id +caido -envenenado`, `turno id`, `rodada [N]`, `porta K3 abrir`, `revelar`/`esconder A1-H8`, `limpar-areas`, `desfazer`.
+3. **Leia a resposta.** Ela traz o caminho e os pés gastos, os avisos de **AdO** e de ataque fora do alcance, e quem foi pego numa área. Comando recusado sai com `ERRO ...` e nada é aplicado. Quando houver erro, conserte e reenvie, ou avise o jogador. Errou no meio da luta? Use `desfazer` e conte ao jogador.
+4. Diagonal custa 5 ft, terreno difícil 10. Passar por aliado pode, por inimigo não.
+5. Ao fim, `mapa.py caderno /caminho/croqui.svg` salva o croqui para o caderno tático (`galeria.py --colecao taticas adicionar`).
+
 ## XP Awards
 
 **Never calculate XP in context.** Use `scripts/xp.py` — it holds all tables and handles character file updates and display pushes. The DM's only decision is the difficulty tier and encounter type.
