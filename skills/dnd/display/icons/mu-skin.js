@@ -51,7 +51,24 @@
     el.addEventListener('mouseenter', ev => { tip.innerHTML = htmlTip(dados()); tip.classList.add('on'); moverTip(ev); });
     el.addEventListener('mousemove', moverTip);
     el.addEventListener('mouseleave', () => tip.classList.remove('on'));
+    el.addEventListener('click', () => abrirModal(dados()));
   }
+
+  // clique num item, slot ou magia abre a ficha completa
+  const modal = document.createElement('div');
+  modal.id = 'mu-modal';
+  document.body.appendChild(modal);
+  function abrirModal(d) {
+    if (!d || !d.nome || d.tipo === 'Vazio') return;
+    tip.classList.remove('on');
+    let h = htmlTip(d);
+    if (d.detalhe) h += d.detalhe.map(([k, v]) => `<div class="t-det"><span>${esc(k)}</span>${esc(v)}</div>`).join('');
+    if (d.efeito) h += `<div class="t-efeito">${esc(d.efeito)}</div>`;
+    modal.innerHTML = `<div class="caixa"><button class="fechar" title="Fechar (Esc)">×</button>${icone(d)}${h}</div>`;
+    modal.classList.add('on');
+  }
+  modal.addEventListener('click', e => { if (e.target === modal || e.target.closest('.fechar')) modal.classList.remove('on'); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') modal.classList.remove('on'); });
 
   // botão ⚙ abre/fecha as configurações da tela
   const cfg = document.createElement('button');
@@ -446,25 +463,28 @@
   let skillsAtuais = [];
   let ultimo = {};
 
+  let grimorio = {}, grimorioCab = {};
   function montarSkills(p) {
     const sheet = p.sheet || {};
     const lista = [];
-    (sheet.attacks || []).forEach(a => {
-      const it = descreverItem(a.name);
-      lista.push({ nome: a.name, img: it.img, icone: it.icone, raridade: 'excelente', tipo: 'Ataque',
-        linhas: [`Ataque ${a.bonus} · dano ${a.damage} ${(a.type || '').toLowerCase()}`], desc: a.notes });
-    });
     const sp = sheet.spells || {};
     const magia = (n, nivelPadrao) => {
       const m = catalogo.magias[semAcento(n)] || {};
-      const nv = m.nivel ?? nivelPadrao;
-      return { nome: m.nome || n, original: n, img: m.img, icone: m.icone || '🔮', nivel: nv, ritual: m.ritual,
+      const g = grimorio[semAcento(n)] || {};
+      const nv = m.nivel ?? g.nivel ?? nivelPadrao;
+      return { nome: m.nome || g.nome || n, original: n, img: g.img || m.img, icone: m.icone || '🔮', nivel: nv, ritual: m.ritual,
         raridade: 'magia', tipo: nv === 0 ? 'Truque' : `Magia de ${nv}º círculo${m.ritual ? ' · ritual' : ''}`,
-        linhas: m.linhas || [], desc: nv === 0 ? '' : `CD ${sp.save_dc ?? '—'} · ataque ${sp.attack_bonus ?? '—'}` };
+        linhas: m.linhas || [], desc: nv === 0 ? '' : `CD ${sp.save_dc ?? grimorioCab.cd ?? '—'} · ataque ${sp.attack_bonus ?? grimorioCab.ataque ?? '—'}`,
+        detalhe: g.nome ? [['Tempo', g.tempo], ['Alcance', g.alcance], ['Componentes', g.componentes], ['Duração', g.duracao]].filter(x => x[1]) : null,
+        efeito: g.efeito };
     };
-    (sp.cantrips || []).forEach(n => lista.push(magia(n, 0)));
-    lista.push({ sep: true });
-    (sp.prepared || []).forEach(n => lista.push(magia(n, 1)));
+    const grupos = [['cantrips', 0], ['prepared', 1], ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(k => ['level' + k, k])];
+    grupos.forEach(([chave, nv]) => {
+      const ns = sp[chave] || [];
+      if (!ns.length) return;
+      if (lista.length) lista.push({ sep: true });
+      ns.forEach(n => lista.push(magia(n, nv)));
+    });
     return lista;
   }
 
@@ -500,7 +520,7 @@
       const semMana = s.nivel > 0 && rest <= 0;
       const ativa = p.concentration && semAcento(p.concentration) === semAcento(s.original || s.nome);
       return `<div class="mu-skill${semMana ? ' sem-mana' : ''}${s.ritual ? ' ritual' : ''}${ativa ? ' ativa' : ''}" data-i="${i}" data-tecla="${tecla}">
-        <span class="tecla">${tecla}</span>${icone(s)}${s.nivel ? `<span class="nv">${s.ritual ? 'R' : s.nivel}</span>` : ''}</div>`;
+        <span class="tecla">${s.nivel ? s.nivel + 'º' : 'T'}</span>${icone(s)}${s.ritual ? '<span class="nv">R</span>' : ''}</div>`;
     }).join('');
     const rapidos = [pocao && { k: 'Q', t: pocao }, fogo && { k: 'W', t: fogo }].filter(Boolean);
     const rapidosHtml = rapidos.length ? '<div class="mu-sep"></div>' + rapidos.map(r => {
@@ -593,5 +613,9 @@
   Promise.all([
     fetch('/icons/mu-itens.json?v=' + Date.now()).then(r => r.json()).then(j => { catalogo = j; }).catch(() => {}),
     fetch('/portraits').then(r => r.json()).then(j => { retratos = j; }).catch(() => {}),
+    fetch('/icons/grimorio.json?v=' + Date.now()).then(r => r.json()).then(j => {
+      grimorioCab = j;
+      (j.magias || []).forEach(m => { grimorio[semAcento(m.original.replace(/\s*\(.*\)/, ''))] = m; });
+    }).catch(() => {}),
   ]).then(() => { aplicarLigada(ligada()); render(); });
 })();

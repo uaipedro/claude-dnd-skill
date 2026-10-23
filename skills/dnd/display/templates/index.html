@@ -9127,6 +9127,14 @@ function _initDicePad() {
   #mapa { position: fixed; inset: 0; z-index: 9000; display: none; background: rgba(10, 8, 5, .9);
     font: .95rem Georgia, serif; color: #e9dcc0; align-items: center; justify-content: center; padding: 14px; }
   #mapa.on { display: flex; }
+  #mapa { overflow: hidden; }
+  #mapa .folha { transform-origin: 0 0; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+  #mapa .folha img { -webkit-user-drag: none; pointer-events: none; }
+  #mapa .folha.arrasta { cursor: grabbing; }
+  #mapa .zoom { position: absolute; right: 14px; bottom: 14px; z-index: 2; display: flex; gap: 6px; }
+  #mapa .zoom button { width: 2.2em; height: 2.2em; background: rgba(25,20,14,.9); color: #e9dcc0;
+    border: 1px solid #6d5a3a; border-radius: 4px; font: 1rem Georgia, serif; cursor: pointer; }
+  #mapa .zoom button:hover { border-color: #d9b36a; }
   #mapa .folha { position: relative; max-width: 100%; max-height: 100%; aspect-ratio: var(--ar, 1);
     height: calc(100vh - 28px); box-shadow: 0 10px 50px rgba(0,0,0,.7); }
   #mapa .folha > * { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -9149,7 +9157,9 @@ function _initDicePad() {
   const cx = document.createElement('div');
   cx.id = 'mapa';
   cx.innerHTML = '<button class="fechar" title="Fechar (Esc)">×</button><div class="rodada"></div>'
-    + '<div class="folha"><img alt=""><svg></svg></div>';
+    + '<div class="folha"><img alt=""><svg></svg></div>'
+    + '<div class="zoom"><button data-z="pj" title="Centralizar no PJ (C)">◎</button><button data-z="-" title="Afastar (−)">−</button>'
+    + '<button data-z="0" title="Mapa inteiro (0)">⤢</button><button data-z="+" title="Aproximar (+)">+</button></div>';
   document.body.append(btn, cx);
   const img = cx.querySelector('img'), svg = cx.querySelector('svg'), folha = cx.querySelector('.folha');
   const rod = cx.querySelector('.rodada');
@@ -9259,6 +9269,46 @@ function _initDicePad() {
 
   function abrir() { if (est) { cx.classList.add('on'); btn.classList.remove('novo'); } }
   const fechar = () => cx.classList.remove('on');
+  // zoom e arrasto: roda do mouse aproxima no cursor; arrastar move; duplo clique volta ao mapa inteiro
+  let z = 1, tx = 0, ty = 0, arr = null;
+  const aplicar = () => { folha.style.transform = `translate(${tx}px, ${ty}px) scale(${z})`; };
+  const zoomEm = (nz, px, py) => {
+    nz = Math.min(8, Math.max(1, nz));
+    const r = folha.getBoundingClientRect(), ox = r.left - tx, oy = r.top - ty;
+    const lx = (px - r.left) / z, ly = (py - r.top) / z;
+    tx = px - ox - lx * nz; ty = py - oy - ly * nz; z = nz;
+    if (z === 1) { tx = 0; ty = 0; }
+    aplicar();
+  };
+  const centroTela = () => [innerWidth / 2, innerHeight / 2];
+  function centrarPJ() {
+    const pj = est && Object.values(est.tokens).find(t => t.lado === 'pj');
+    if (!pj) return;
+    if (z < 3) zoomEm(3, ...centroTela());
+    const r = folha.getBoundingClientRect(), [cxp, cyp] = centro(pj.pos);
+    const vb = svg.viewBox.baseVal, k = r.width / vb.width;
+    const sx = r.left + (cxp - vb.x) * k, sy = r.top + (cyp - vb.y) * k;
+    tx += innerWidth / 2 - sx; ty += innerHeight / 2 - sy; aplicar();
+  }
+  cx.addEventListener('wheel', e => { e.preventDefault(); zoomEm(z * (e.deltaY < 0 ? 1.2 : 1 / 1.2), e.clientX, e.clientY); }, { passive: false });
+  folha.addEventListener('pointerdown', e => { e.preventDefault(); arr = [e.clientX - tx, e.clientY - ty]; folha.setPointerCapture(e.pointerId); folha.classList.add('arrasta'); });
+  folha.addEventListener('pointermove', e => { if (arr) { tx = e.clientX - arr[0]; ty = e.clientY - arr[1]; aplicar(); } });
+  const solta = () => { arr = null; folha.classList.remove('arrasta'); };
+  folha.addEventListener('pointerup', solta); folha.addEventListener('pointercancel', solta);
+  folha.addEventListener('dblclick', () => zoomEm(1, 0, 0));
+  cx.querySelector('.zoom').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const d = b.dataset.z;
+    if (d === 'pj') centrarPJ(); else if (d === '0') zoomEm(1, 0, 0);
+    else zoomEm(z * (d === '+' ? 1.4 : 1 / 1.4), ...centroTela());
+  });
+  document.addEventListener('keydown', e => {
+    if (!cx.classList.contains('on') || /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) return;
+    if (e.key === '+' || e.key === '=') zoomEm(z * 1.4, ...centroTela());
+    else if (e.key === '-') zoomEm(z / 1.4, ...centroTela());
+    else if (e.key === '0') zoomEm(1, 0, 0);
+    else if (e.key === 'c' || e.key === 'C') centrarPJ();
+  });
   window._onMapa = receber;
   btn.onclick = () => cx.classList.contains('on') ? fechar() : abrir();
   cx.querySelector('.fechar').onclick = fechar;

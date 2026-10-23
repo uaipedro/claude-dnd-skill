@@ -538,3 +538,31 @@ body.mu #dice3d-plate { right: 340px !important; }
 #mu-musica-painel .titulo { color: #e8c061; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #mu-musica-painel label { display: flex; gap: 8px; align-items: center; }
 #mu-musica-painel input { flex: 1; accent-color: #e8c061; }
+
+/* LOCAL PATCH S9: barra só com magias (número = círculo) e ficha ao clicar */
+.mu-skills { flex-wrap: wrap; max-width: 760px; margin: 0 auto; }
+.mu-skill .tecla { font-size: 10px; color: #8fc1ff; font-weight: bold; }
+#mu-modal { position: fixed; inset: 0; z-index: 9500; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); }
+#mu-modal.on { display: flex; }
+#mu-modal .caixa { position: relative; width: min(420px, calc(100vw - 32px)); max-height: 80vh; overflow-y: auto;
+  background: linear-gradient(#15110b, #070504); border: 1px solid #5a4526; box-shadow: 0 0 0 1px #000, 0 10px 40px #000;
+  padding: 18px 20px; color: #ddd; font: 13px/1.5 Georgia, serif; text-align: center; }
+#mu-modal .caixa > .ico { font-size: 42px; display: block; margin: 0 auto 6px; }
+#mu-modal .caixa > img.ico { width: 72px; height: 72px; object-fit: contain; }
+#mu-modal .fechar { position: absolute; top: 4px; right: 8px; background: none; border: 0; color: #bba984; font-size: 22px; cursor: pointer; }
+#mu-modal .t-nome { font-size: 17px; font-weight: bold; margin-bottom: 2px; text-shadow: 0 0 6px currentColor; }
+#mu-modal .t-tipo { color: #9a9a9a; font-size: 11px; margin-bottom: 8px; }
+#mu-modal .t-lin { color: #fff; }
+#mu-modal .t-op { color: #8fc1ff; }
+#mu-modal .t-aviso { color: #ff6b5a; }
+#mu-modal .t-desc { color: #c9b996; font-style: italic; margin-top: 8px; }
+#mu-modal .t-det { text-align: left; color: #eee; font-size: 12px; }
+#mu-modal .t-det span { color: #bba984; display: inline-block; min-width: 92px; }
+#mu-modal .t-efeito { text-align: left; color: #e9dcc0; margin-top: 10px; padding-top: 10px; border-top: 1px solid #3a2e1c; }
+#mu-modal .r-comum     { color: #ffffff; }
+#mu-modal .r-excelente { color: #5cff6e; }
+#mu-modal .r-antigo    { color: #6fa8ff; }
+#mu-modal .r-magico    { color: #e08cff; }
+#mu-modal .r-missao    { color: #ffa63d; }
+#mu-modal .r-magia     { color: #ffe08a; }
+.mu-skill img.ico[src*="/magias/"] { width: 40px; height: 40px; border-radius: 3px; }
