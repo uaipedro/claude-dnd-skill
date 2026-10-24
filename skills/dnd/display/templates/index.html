@@ -9073,7 +9073,10 @@ function _initDicePad() {
   const cx = document.createElement('div');
   cx.id = 'caderno';
   cx.innerHTML = '<nav></nav><main><button class="fechar" title="Fechar (Esc)">×</button><img alt=""><p></p></main>';
-  document.body.append(btn, cx);
+  const mini = document.createElement('div');
+  mini.id = 'mini'; mini.title = 'Arredores (clique abre o mapa)';
+  mini.innerHTML = '<svg preserveAspectRatio="xMidYMid slice"></svg><div class="nm"></div>';
+  document.body.append(btn, cx, mini);
   const nav = cx.querySelector('nav'), img = cx.querySelector('main img'), leg = cx.querySelector('main p');
   let paginas = [], atual = 0;
 
@@ -9103,6 +9106,7 @@ function _initDicePad() {
   const fechar = () => cx.classList.remove('on');
 
   btn.onclick = () => cx.classList.contains('on') ? fechar() : abrir();
+  mini.onclick = () => { abrir(); centrarPJ(); };
   nav.addEventListener('click', e => { const b = e.target.closest('button[data-i]'); if (b) ver(+b.dataset.i); });
   cx.querySelector('.fechar').onclick = fechar;
   cx.addEventListener('click', e => { if (e.target === cx || e.target.tagName === 'MAIN') fechar(); });
@@ -9147,6 +9151,13 @@ function _initDicePad() {
   @keyframes mapa-some { 0% { opacity: .55; } 70% { opacity: .35; } 100% { opacity: 0; } }
   @keyframes mapa-sobe { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-34px); } }
   @media (max-width: 700px) { #mapa .folha { height: auto; width: 100%; } }
+  #mini { position: fixed; right: 14px; bottom: 96px; z-index: 8300; width: 240px; height: 180px; display: none;
+    background: #eadcb8; border: 2px solid #a8823c; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.5); cursor: pointer; overflow: hidden; }
+  #mini.on { display: block; }
+  #mini svg { width: 100%; height: 100%; display: block; }
+  #mini .nm { position: absolute; left: 6px; bottom: 3px; font: italic 11px Georgia, serif; color: #2b2116;
+    text-shadow: 0 0 3px #eadcb8, 0 0 3px #eadcb8; pointer-events: none; }
+  body.input-only #mini, #mapa.on ~ #mini { display: none; }
 </style>
 <script>
 (() => {
@@ -9185,6 +9196,25 @@ function _initDicePad() {
     const vistos = new Set();
     for (const t of Object.values(est.tokens)) { vistos.add(t.id); desenhar(t, movidos.has(t.id)); }
     camadas.tk.querySelectorAll('.tk').forEach(g => { if (!vistos.has(g.dataset.id)) g.remove(); });
+    montarMini();
+  }
+
+  // minimapa: recorte de ~14x10 casas em volta do PJ, sempre visível no canto
+  function montarMini() {
+    const ms = mini.querySelector('svg'), W = est.w * S, H = est.h * S;
+    const pj = Object.values(est.tokens).find(t => t.lado === 'pj' && !t.morto);
+    const [cxp, cyp] = pj ? centro(pj.pos) : [W / 2, H / 2];
+    const vw = 14 * S, vh = 10.5 * S;
+    ms.setAttribute('viewBox', `${cxp - vw / 2} ${cyp - vh / 2} ${vw} ${vh}`);
+    let h = `<image href="/mapa/base.svg?v=${est.base_v}" x="${-M}" y="${-M}" width="${W + 2 * M}" height="${H + 2 * M}" preserveAspectRatio="none"/>`;
+    for (const t of Object.values(est.tokens)) {
+      const [x, y] = centro(t.pos);
+      h += t.morto ? `<path d="M${x-9} ${y-9}L${x+9} ${y+9}M${x+9} ${y-9}L${x-9} ${y+9}" stroke="#2b2116" stroke-width="3"/>`
+        : `<circle cx="${x}" cy="${y}" r="${t.lado === 'pj' ? 15 : 12}" fill="${COR[t.lado] || '#555'}" stroke="#f3e9d0" stroke-width="3"/>`;
+    }
+    ms.innerHTML = h;
+    mini.querySelector('.nm').textContent = est.titulo || '';
+    mini.classList.add('on');
   }
 
   function desenhar(t, vaiAnimar) {
@@ -9253,7 +9283,7 @@ function _initDicePad() {
   }
 
   function receber(m) {
-    if (m === null) { fechar(); return; }
+    if (m === null) { fechar(); mini.classList.remove('on'); return; }
     fila = fila.then(async () => {
       if (est && m.estado.v <= est.v && !m.abrir) return;  // mensagem velha fora de ordem
       const reset = m.eventos.some(e => e.t === 'reset');
